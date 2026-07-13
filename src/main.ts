@@ -17,6 +17,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
   private status: SyncConnectionStatus = 'disabled';
   private lag = 0;
   private conflicts = 0;
+  private pendingRetry: number | null = null;
 
   async onload(): Promise<void> {
     this.store = new PluginStore(this);
@@ -37,6 +38,8 @@ export default class CentralVaultSyncPlugin extends Plugin {
   }
 
   onunload(): void {
+    if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
+    this.pendingRetry = null;
     void this.localQueue?.flushAll().catch(() => {});
     this.localQueue?.dispose();
     this.engine?.stop();
@@ -57,6 +60,8 @@ export default class CentralVaultSyncPlugin extends Plugin {
   }
 
   async unpair(): Promise<void> {
+    if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
+    this.pendingRetry = null;
     this.engine?.stop(); this.localQueue?.dispose(); this.store.clearToken();
     this.engine = null; this.client = null; this.adapter = null; this.localQueue = null;
     await this.store.update((state) => {
@@ -79,9 +84,20 @@ export default class CentralVaultSyncPlugin extends Plugin {
     if (this.store.state.paused) throw new Error('Sync is paused');
     if (!this.engine || !this.localQueue) throw new Error('Device is not paired');
     this.setStatus('syncing', this.lag);
-    await this.localQueue.flushAll();
-    await this.engine.flush();
-    await this.engine.catchUp();
+    try {
+      await this.localQueue.flushAll();
+      await this.engine.start();
+      await this.engine.flush();
+      await this.engine.catchUp();
+      if (this.store.state.lastError !== null) await this.store.update((state) => { state.lastError = null; });
+      if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
+      this.pendingRetry = null;
+    } catch (error) {
+      this.setStatus('offline', this.lag);
+      await this.recordError(error);
+      if (this.store.state.pendingPaths.length > 0) this.schedulePendingRetry();
+      throw error;
+    }
   }
 
   diagnostics(): string {
@@ -99,6 +115,8 @@ export default class CentralVaultSyncPlugin extends Plugin {
   }
 
   private async startClient(): Promise<void> {
+    if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
+    this.pendingRetry = null;
     this.engine?.stop(); this.localQueue?.dispose();
     const device = await this.store.getDevice();
     if (!device) return;
@@ -118,10 +136,16 @@ export default class CentralVaultSyncPlugin extends Plugin {
       (text) => new Notice(text),
     );
     await this.scanLocalChanges();
-    await this.localQueue.flushAll();
-    await this.engine.start().catch(async (error) => {
-      await this.recordError(error); throw error;
-    });
+    await this.syncNow().catch(() => {});
+  }
+
+  private schedulePendingRetry(): void {
+    if (this.pendingRetry !== null || this.store.state.paused || !this.engine || !this.localQueue) return;
+    const delay = Math.max(1_000, this.store.state.fallbackPollSeconds * 1_000);
+    this.pendingRetry = window.setTimeout(() => {
+      this.pendingRetry = null;
+      void this.syncNow().catch(() => {});
+    }, delay);
   }
 
   private registerCommands(): void {

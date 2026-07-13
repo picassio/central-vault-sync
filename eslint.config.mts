@@ -39,4 +39,8 @@ export default defineConfig(
 			'no-console': 'off',
 		},
 	},
+	{
+		files: ['test/register-obsidian.mjs'],
+		rules: { 'obsidianmd/no-global-this': 'off' },
+	},
 );

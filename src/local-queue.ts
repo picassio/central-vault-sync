@@ -11,6 +11,7 @@ import type { OrderedSyncClient } from '@webobsidian/sync-core';
 
 export class LocalMutationQueue {
   private timers = new Map<string, number>();
+  private flushChain: Promise<void> = Promise.resolve();
   constructor(
     private readonly vault: Vault,
     private readonly configDir: string,
@@ -34,7 +35,7 @@ export class LocalMutationQueue {
   async flushAll(): Promise<void> {
     for (const handle of this.timers.values()) window.clearTimeout(handle);
     this.timers.clear();
-    for (const pending of [...this.store.state.pendingPaths]) await this.flush(pending);
+    for (const pending of [...this.store.state.pendingPaths]) await this.runFlush(pending);
   }
   dispose(): void {
     for (const handle of this.timers.values()) window.clearTimeout(handle);
@@ -46,31 +47,43 @@ export class LocalMutationQueue {
     if (prior !== undefined) window.clearTimeout(prior);
     this.timers.set(pending.path, window.setTimeout(() => {
       this.timers.delete(pending.path);
-      void this.flush(pending).catch((error) => {
+      void this.runFlush(pending).catch((error) => {
         this.notice(`Central Sync: ${error instanceof Error ? error.message : String(error)}`);
       });
     }, delay));
   }
 
+  private runFlush(pending: PendingPath): Promise<void> {
+    const result = this.flushChain.then(() => this.flush(pending));
+    this.flushChain = result.catch(() => undefined);
+    return result;
+  }
+
   private async flush(pending: PendingPath): Promise<void> {
+    const current = this.store.state.pendingPaths.find((item) => item.path === pending.path);
+    if (!current || current.observedAt !== pending.observedAt || current.action !== pending.action || current.oldPath !== pending.oldPath) return;
     if (this.store.state.paused) return;
     assertServerPathAllowed(pending.path);
     let operation: SyncOperation | null = null;
-    const clientSequence = await this.store.takeClientSequence();
-    const idempotencyKey = `plugin-${clientSequence}-${randomId()}`;
 
     if (pending.action === 'delete') {
       const entry = this.store.entryByPath(pending.path);
-      if (entry) operation = {
-        operation: entry.kind === 'directory' ? 'rmdir' : 'delete', entryId: entry.entryId,
-        baseRevision: entry.revision, clientSequence, idempotencyKey,
-      };
+      if (entry) {
+        const { clientSequence, idempotencyKey } = await this.operationIdentity();
+        operation = {
+          operation: entry.kind === 'directory' ? 'rmdir' : 'delete', entryId: entry.entryId,
+          baseRevision: entry.revision, clientSequence, idempotencyKey,
+        };
+      }
     } else if (pending.action === 'rename') {
       const entry = pending.oldPath ? this.store.entryByPath(pending.oldPath) : null;
-      if (entry) operation = {
-        operation: 'rename', entryId: entry.entryId, baseRevision: entry.revision,
-        path: pending.path, clientSequence, idempotencyKey,
-      };
+      if (entry) {
+        const { clientSequence, idempotencyKey } = await this.operationIdentity();
+        operation = {
+          operation: 'rename', entryId: entry.entryId, baseRevision: entry.revision,
+          path: pending.path, clientSequence, idempotencyKey,
+        };
+      }
     } else {
       const file = this.vault.getAbstractFileByPath(pending.path);
       if (!file) {
@@ -79,7 +92,10 @@ export class LocalMutationQueue {
       }
       const entry = this.store.entryByPath(pending.path);
       if (file instanceof TFolder) {
-        if (!entry) operation = { operation: 'mkdir', path: pending.path, kind: 'directory', clientSequence, idempotencyKey };
+        if (!entry) {
+          const { clientSequence, idempotencyKey } = await this.operationIdentity();
+          operation = { operation: 'mkdir', path: pending.path, kind: 'directory', clientSequence, idempotencyKey };
+        }
       } else if (file instanceof TFile) {
         const content = await this.adapter.hashFile(file);
         if (await this.adapter.consumeExpected(pending.path, content.hash)) {
@@ -97,6 +113,7 @@ export class LocalMutationQueue {
           const bytes = content.bytes ?? new TextEncoder().encode(content.text).slice().buffer;
           await this.client.upload(bytes, content.hash);
         }
+        const { clientSequence, idempotencyKey } = await this.operationIdentity();
         operation = entry
           ? { operation: 'modify', entryId: entry.entryId, baseRevision: entry.revision, clientSequence, idempotencyKey, content: reference }
           : { operation: 'create', path: pending.path, kind: 'file', clientSequence, idempotencyKey, content: reference };
@@ -104,6 +121,11 @@ export class LocalMutationQueue {
     }
     if (operation) await this.engine.queue(operation);
     await this.store.removePendingPath(pending.path);
+  }
+
+  private async operationIdentity(): Promise<{ clientSequence: number; idempotencyKey: string }> {
+    const clientSequence = await this.store.takeClientSequence();
+    return { clientSequence, idempotencyKey: `plugin-${clientSequence}-${randomId()}` };
   }
 }
 
