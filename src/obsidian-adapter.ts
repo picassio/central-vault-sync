@@ -97,11 +97,12 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
       throw new Error(`large download awaiting approval: ${entry.path}`);
     }
     const existing = this.vault.getAbstractFileByPath(entry.path);
-    await this.assertNoLocalWork(entry.path, false);
     if (existing instanceof TFile) {
       const current = await this.hashFile(existing);
       if (current.hash === entry.hash) { this.expected.set(entry.path, { hash: entry.hash, revision: entry.revision }); return; }
-    } else if (existing) {
+    }
+    await this.assertNoLocalWork(entry.path, false);
+    if (existing && !(existing instanceof TFile)) {
       throw new Error(`path kind collision: ${entry.path}`);
     }
     const downloaded = await this.client.download(entry.entryId, entry.revision);
@@ -116,6 +117,14 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   private async rename(from: string, to: string, hash: string | null, revision: number): Promise<void> {
     const source = this.vault.getAbstractFileByPath(from);
     const destination = this.vault.getAbstractFileByPath(to);
+    if (!source && destination instanceof TFolder && hash === null) {
+      this.expected.set(to, { hash, revision });
+      return;
+    }
+    if (!source && destination instanceof TFile && hash && (await this.hashFile(destination)).hash === hash) {
+      this.expected.set(to, { hash, revision });
+      return;
+    }
     await this.assertNoLocalWork(from, source instanceof TFolder);
     await this.assertNoLocalWork(to, destination instanceof TFolder);
     if (!source) return;
@@ -126,8 +135,8 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   }
   private async remove(path: string, revision: number): Promise<void> {
     const target = this.vault.getAbstractFileByPath(path);
-    await this.assertNoLocalWork(path, target instanceof TFolder);
     if (!target) return;
+    await this.assertNoLocalWork(path, target instanceof TFolder);
     this.expected.set(path, { hash: null, revision });
     await this.fileManager.trashFile(target);
   }

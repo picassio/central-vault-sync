@@ -33,7 +33,7 @@ test('concurrent file uploads cannot overtake reserved client sequences', async 
     },
   };
   const queued: SyncOperation[] = [];
-  const engine = { async queue(operation: SyncOperation) { queued.push(operation); } };
+  const engine = { async enqueue(operation: SyncOperation) { queued.push(operation); }, async flush() {} };
   const adapter = {
     async hashFile(file: TFile) {
       const hash = hashes[file.path as keyof typeof hashes];
@@ -60,6 +60,40 @@ test('concurrent file uploads cannot overtake reserved client sequences', async 
   assert.deepEqual(state.pendingPaths, []);
 });
 
+test('pending path is replaced by a durable operation before network publication', async () => {
+  const file = Object.assign(new TFile(), { path: 'Wake.md', name: 'Wake.md', extension: 'md' });
+  const state = {
+    paused: false, modifyDebounceMs: 0, excludeGlobs: [], pendingPaths: [], operations: [], nextClientSequence: 1,
+  } as unknown as PluginState;
+  const store = {
+    state,
+    async queuePath(pending: PendingPath) { state.pendingPaths = [pending]; },
+    async removePendingPath(path: string) { state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path); },
+    async takeClientSequence() { const value = state.nextClientSequence; state.nextClientSequence += 1; return value; },
+    entryByPath() { return null; },
+  };
+  let published = false;
+  const engine = {
+    async enqueue(operation: SyncOperation) { state.operations = [operation]; },
+    async flush() {
+      assert.deepEqual(state.pendingPaths, []);
+      assert.equal(state.operations.length, 1);
+      published = true;
+      state.operations = [];
+    },
+  };
+  const queue = new LocalMutationQueue(
+    { getAbstractFileByPath: () => file } as never, '.config-test', store as never,
+    { upload: async () => {} } as never, engine as never,
+    { hashFile: async () => ({ hash: 'f'.repeat(64), size: 1, bytes: new Uint8Array([1]).buffer }), consumeExpected: async () => false } as never,
+    () => {},
+  );
+
+  await queue.observe('upsert', file);
+  await waitFor(() => published);
+  assert.equal(state.nextClientSequence, 2);
+});
+
 test('rename event bursts preserve identity and rehash destination content in sequence order', async () => {
   const oldHash = '1'.repeat(64); const newHash = '2'.repeat(64);
   const file = Object.assign(new TFile(), { path: 'New.md', name: 'New.md', extension: 'md' });
@@ -69,7 +103,7 @@ test('rename event bursts preserve identity and rehash destination content in se
   const queued: SyncOperation[] = [];
   const queue = new LocalMutationQueue(
     { getAbstractFileByPath: (path: string) => files.get(path) ?? null } as never, '.config-test', store,
-    { upload: async () => {} } as never, { queue: async (operation: SyncOperation) => { queued.push(operation); } } as never,
+    { upload: async () => {} } as never, { enqueue: async (operation: SyncOperation) => { queued.push(operation); }, flush: async () => {} } as never,
     { hashFile: async () => ({ hash: newHash, size: 1, bytes: new Uint8Array([2]).buffer }), consumeExpected: async () => false } as never,
     () => {},
   );
@@ -91,7 +125,7 @@ test('rename immediately followed by delete collapses to deletion of the origina
   const queued: SyncOperation[] = [];
   const queue = new LocalMutationQueue(
     { getAbstractFileByPath: (path: string) => files.get(path) ?? null } as never, '.config-test', store,
-    { upload: async () => {} } as never, { queue: async (operation: SyncOperation) => { queued.push(operation); } } as never,
+    { upload: async () => {} } as never, { enqueue: async (operation: SyncOperation) => { queued.push(operation); }, flush: async () => {} } as never,
     { hashFile: async () => ({ hash: '3'.repeat(64), size: 1, bytes: new Uint8Array([3]).buffer }), consumeExpected: async () => false } as never,
     () => {},
   );
@@ -125,7 +159,7 @@ test('startup reconciliation does not persist or sequence unchanged projected fi
   let localHash = hash;
   const queue = new LocalMutationQueue(
     { getAbstractFileByPath: () => file } as never, '.config-test', store as never,
-    { upload: async () => {} } as never, { queue: async () => {} } as never,
+    { upload: async () => {} } as never, { enqueue: async () => {}, flush: async () => {} } as never,
     { hashFile: async () => ({ hash: localHash, size: 1, bytes: new Uint8Array([1]).buffer }), consumeExpected: async () => false } as never,
     () => {},
   );
@@ -162,7 +196,7 @@ test('runtime upload failure reports offline work without consuming its sequence
     { getAbstractFileByPath: () => file } as never,
     '.config-test', store as never,
     { upload: async () => { throw new Error('network unavailable'); } } as never,
-    { queue: async () => { throw new Error('operation must not be queued'); } } as never,
+    { enqueue: async () => { throw new Error('operation must not be queued'); }, flush: async () => {} } as never,
     { hashFile: async () => ({ hash: 'c'.repeat(64), size: 1, bytes: new Uint8Array([1]).buffer }), consumeExpected: async () => false } as never,
     reportError,
   );

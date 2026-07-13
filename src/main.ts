@@ -105,7 +105,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     } catch (error) {
       this.setStatus('offline', this.lag);
       await this.recordError(error);
-      if (this.store.state.pendingPaths.length > 0) this.schedulePendingRetry();
+      if (this.store.state.pendingPaths.length > 0 || this.store.state.operations.length > 0) this.schedulePendingRetry();
       throw error;
     }
   }

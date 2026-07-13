@@ -139,7 +139,15 @@ export class LocalMutationQueue {
           : { operation: 'create', path: pending.path, kind: 'file', clientSequence, idempotencyKey, content: reference };
       }
     }
-    if (operation) await this.engine.queue(operation);
+    if (operation) {
+      // Keep the path marker until the operation itself is durable, then remove it before publishing.
+      // A server wake can otherwise pull our echo while assertNoLocalWork still sees the marker.
+      await this.engine.enqueue(operation);
+      await this.store.removePendingPath(pending.path);
+      if (pending.action === 'rename') await this.queueRenameFollowUp(pending);
+      await this.engine.flush();
+      return;
+    }
     await this.store.removePendingPath(pending.path);
     if (pending.action === 'rename') await this.queueRenameFollowUp(pending);
   }
