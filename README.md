@@ -58,7 +58,7 @@ The status bar and notices report unresolved conflicts without blocking unrelate
 - Connects only to the server URL configured by the user.
 - Sends vault file paths, content/hashes, device name, revisions, queue operations, acknowledgements, pairing exchange, and diagnostics needed for synchronization.
 - Does not use analytics, advertising, telemetry, third-party APIs, or remote code execution.
-- The device bearer token is stored in Obsidian SecretStorage and is never written to plugin data, logs, diagnostics, or the vault.
+- The device bearer token is stored only through Obsidian SecretStorage and is never written to plugin data, logs, diagnostics, or the vault. Encryption at rest depends on a working platform keychain; Obsidian shows its own warning and may use an unencrypted fallback when no secret store is available. Configure a keychain on shared/untrusted systems.
 - Redacted diagnostics include server origin, device/vault IDs, cursor/queue counts, platform flags, exclusions, and sanitized errors; they exclude credentials and note content.
 - Server administrators can revoke a device immediately.
 

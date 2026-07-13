@@ -12,7 +12,7 @@ Until the first stable Community Plugins release, only the latest tagged pre-rel
 
 - The configured WebObsidian server is trusted with plaintext vault content because it provides search and indexing.
 - TLS is required outside loopback. Certificate verification is delegated to the platform; there is no insecure bypass.
-- Pairing codes are one-use and short-lived. Device tokens are dedicated, revocable sync credentials stored through SecretStorage.
+- Pairing codes are one-use and short-lived. Device tokens are dedicated, revocable sync credentials stored only through Obsidian SecretStorage. SecretStorage encryption depends on the operating-system keychain; when none is available, Obsidian warns that its fallback is unencrypted. Operators must configure a keychain or treat the local account/storage as credential-sensitive.
 - Server paths pass the shared normalization and exclusion policy before any Vault API mutation.
 - Downloads and uploads are verified by SHA-256 and size.
 - WebSocket data is advisory only; authenticated REST catch-up determines content and order.
