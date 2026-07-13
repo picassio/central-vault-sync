@@ -60,6 +60,44 @@ test('concurrent file uploads cannot overtake reserved client sequences', async 
   assert.deepEqual(state.pendingPaths, []);
 });
 
+test('startup reconciliation does not persist or sequence unchanged projected files', async () => {
+  const file = Object.assign(new TFile(), { path: 'Stable.md', name: 'Stable.md', extension: 'md' });
+  const hash = 'd'.repeat(64);
+  const state = {
+    paused: false, modifyDebounceMs: 10_000, excludeGlobs: [], pendingPaths: [], operations: [],
+    nextClientSequence: 1,
+    entries: [{ entryId: 'entry_stable_projected', path: 'Stable.md', kind: 'file', revision: 1, hash, size: 1,
+      modifiedAt: '2026-07-13T00:00:00.000Z', deleted: false, sequence: 1 }],
+  } as unknown as PluginState;
+  let queueWrites = 0;
+  const store = {
+    state,
+    async queuePath(pending: PendingPath) { queueWrites += 1; state.pendingPaths = [pending]; },
+    async removePendingPath(path: string) { state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path); },
+    async takeClientSequence() { const value = state.nextClientSequence; state.nextClientSequence += 1; return value; },
+    entryByPath(path: string) { return state.entries.find((entry) => !entry.deleted && entry.path === path) ?? null; },
+  };
+  let localHash = hash;
+  const queue = new LocalMutationQueue(
+    { getAbstractFileByPath: () => file } as never, '.config-test', store as never,
+    { upload: async () => {} } as never, { queue: async () => {} } as never,
+    { hashFile: async () => ({ hash: localHash, size: 1, bytes: new Uint8Array([1]).buffer }), consumeExpected: async () => false } as never,
+    () => {},
+  );
+
+  await queue.reconcile(file);
+  assert.equal(queueWrites, 0);
+  assert.equal(state.nextClientSequence, 1);
+  assert.equal(state.pendingPaths.length, 0);
+
+  localHash = 'e'.repeat(64);
+  await queue.reconcile(file);
+  assert.equal(queueWrites, 1);
+  assert.equal(state.pendingPaths[0]?.path, 'Stable.md');
+  assert.equal(state.nextClientSequence, 1);
+  queue.dispose();
+});
+
 test('runtime upload failure reports offline work without consuming its sequence or marker', async () => {
   const file = Object.assign(new TFile(), { path: 'Offline.md', name: 'Offline.md', extension: 'md' });
   const state = {

@@ -206,8 +206,12 @@ export default class CentralVaultSyncPlugin extends Plugin {
   private async scanLocalChanges(): Promise<void> {
     if (!this.localQueue) return;
     const folders = this.app.vault.getAllFolders(false).sort((a, b) => a.path.split('/').length - b.path.split('/').length);
-    for (const folder of folders) await this.localQueue.observe('upsert', folder);
-    for (const file of this.app.vault.getFiles()) await this.localQueue.observe('upsert', file);
+    const paths = [...folders, ...this.app.vault.getFiles()];
+    for (let index = 0; index < paths.length; index += 1) {
+      if (!this.active) return;
+      await this.localQueue.reconcile(paths[index]!);
+      if ((index + 1) % 100 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
   }
   private setStatus(status: SyncConnectionStatus, lag: number): void {
     this.status = status; this.lag = lag; this.renderStatus();

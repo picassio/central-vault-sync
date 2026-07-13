@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sha256Text, type SyncEvent, type SyncOperation } from '@webobsidian/sync-core';
+import { sha256Text, type SyncEntry, type SyncEvent, type SyncOperation } from '@webobsidian/sync-core';
 import { PluginStore } from '../src/plugin-store.js';
 
 function fakePlugin(initial: unknown = null) {
@@ -71,6 +71,30 @@ test('apply intents and blob-reference operations survive reload without storing
   await reloaded.load();
   assert.deepEqual(await reloaded.operations(), [operation]);
   assert.equal((await reloaded.applyIntents())[0]?.event.sequence, 2);
+});
+
+test('large projections use indexed path/id lookup and update rename/tombstone mappings', async () => {
+  const store = new PluginStore(fakePlugin().plugin);
+  await store.load();
+  const entries: SyncEntry[] = Array.from({ length: 10_000 }, (_, index) => ({
+    entryId: `entry_indexed_${index}`, path: `Folder/Note-${index}.md`, kind: 'file', revision: 1,
+    hash: sha256Text(String(index)), size: String(index).length, modifiedAt: '2026-07-13T00:00:00.000Z',
+    deleted: false, sequence: index + 1,
+  }));
+  await store.replaceEntries(entries);
+  store.state.entries.find = () => { throw new Error('linear projection lookup'); };
+  assert.equal(store.entryByPath('Folder/Note-9999.md')?.entryId, 'entry_indexed_9999');
+  assert.equal(store.entryById('entry_indexed_9999')?.path, 'Folder/Note-9999.md');
+  delete (store.state.entries as { find?: unknown }).find;
+
+  const renamed = { ...entries[9999]!, path: 'Renamed.md', revision: 2, sequence: 10_001 };
+  await store.putEntry(renamed);
+  assert.equal(store.entryByPath('Folder/Note-9999.md'), null);
+  assert.equal(store.entryByPath('Renamed.md')?.entryId, renamed.entryId);
+  await store.putEntry({ ...renamed, deleted: true, hash: null, revision: 3, sequence: 10_002 });
+  assert.equal(store.entryByPath('Renamed.md'), null);
+  assert.equal(store.entryById(renamed.entryId)?.deleted, true);
+  assert.equal(store.state.entries.length, 10_000);
 });
 
 test('exact duplicate operation converges but changed idempotency payload is rejected', async () => {

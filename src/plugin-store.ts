@@ -44,6 +44,9 @@ export const DEFAULT_STATE: PluginState = {
 export class PluginStore implements SyncClientPersistence {
   state: PluginState = structuredClone(DEFAULT_STATE);
   private writes: Promise<void> = Promise.resolve();
+  private readonly entriesByPath = new Map<string, SyncEntry>();
+  private readonly entriesById = new Map<string, SyncEntry>();
+  private readonly entryPositions = new Map<string, number>();
   private readonly secretId = 'central-vault-sync-token';
   constructor(private readonly plugin: Plugin) {}
 
@@ -54,6 +57,7 @@ export class PluginStore implements SyncClientPersistence {
     this.state.applyIntents ??= [];
     this.state.entries ??= [];
     this.state.pendingPaths ??= [];
+    this.rebuildEntryIndexes();
   }
   async save(): Promise<void> {
     const snapshot = structuredClone(this.state);
@@ -62,7 +66,9 @@ export class PluginStore implements SyncClientPersistence {
     return write;
   }
   async update(mutator: (state: PluginState) => void): Promise<void> {
+    const entries = this.state.entries;
     mutator(this.state);
+    if (this.state.entries !== entries) this.rebuildEntryIndexes();
     await this.save();
   }
 
@@ -107,13 +113,20 @@ export class PluginStore implements SyncClientPersistence {
   }
   async applyIntents() { return [...this.state.applyIntents]; }
 
-  entryByPath(path: string): SyncEntry | null { return this.state.entries.find((entry) => !entry.deleted && entry.path === path) ?? null; }
-  entryById(entryId: string): SyncEntry | null { return this.state.entries.find((entry) => entry.entryId === entryId) ?? null; }
+  entryByPath(path: string): SyncEntry | null { return this.entriesByPath.get(path) ?? null; }
+  entryById(entryId: string): SyncEntry | null { return this.entriesById.get(entryId) ?? null; }
   async replaceEntries(entries: SyncEntry[]) { await this.update((state) => { state.entries = entries; }); }
   async putEntry(entry: SyncEntry) {
-    await this.update((state) => {
-      state.entries = [...state.entries.filter((item) => item.entryId !== entry.entryId), entry];
-    });
+    const prior = this.entriesById.get(entry.entryId);
+    const position = this.entryPositions.get(entry.entryId);
+    if (position === undefined) {
+      this.entryPositions.set(entry.entryId, this.state.entries.length);
+      this.state.entries.push(entry);
+    } else this.state.entries[position] = entry;
+    if (prior && this.entriesByPath.get(prior.path)?.entryId === prior.entryId) this.entriesByPath.delete(prior.path);
+    this.entriesById.set(entry.entryId, entry);
+    if (!entry.deleted) this.entriesByPath.set(entry.path, entry);
+    await this.save();
   }
   async queuePath(pending: PendingPath) {
     await this.update((state) => {
@@ -122,5 +135,15 @@ export class PluginStore implements SyncClientPersistence {
   }
   async removePendingPath(path: string) {
     await this.update((state) => { state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path); });
+  }
+
+  private rebuildEntryIndexes(): void {
+    this.entriesByPath.clear(); this.entriesById.clear(); this.entryPositions.clear();
+    for (let index = 0; index < this.state.entries.length; index += 1) {
+      const entry = this.state.entries[index]!;
+      this.entriesById.set(entry.entryId, entry);
+      this.entryPositions.set(entry.entryId, index);
+      if (!entry.deleted) this.entriesByPath.set(entry.path, entry);
+    }
   }
 }

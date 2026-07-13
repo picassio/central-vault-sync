@@ -32,6 +32,21 @@ export class LocalMutationQueue {
     await this.store.queuePath(pending);
     this.schedule(pending, action === 'upsert' ? this.store.state.modifyDebounceMs : 0);
   }
+  async reconcile(file: TAbstractFile): Promise<void> {
+    const path = normalizePath(file.path);
+    if (path === this.configDir || path.startsWith(`${this.configDir}/`) || excluded(path, this.store.state.excludeGlobs)) return;
+    const pending = this.store.state.pendingPaths.find((item) => item.path === path);
+    if (pending) { this.schedule(pending, 0); return; }
+    const entry = this.store.entryByPath(path);
+    if (file instanceof TFolder) {
+      if (entry?.kind === 'directory') return;
+      if (entry) throw new Error(`local path kind differs from server projection: ${path}`);
+    } else if (file instanceof TFile && entry) {
+      if (entry.kind !== 'file') throw new Error(`local path kind differs from server projection: ${path}`);
+      if ((await this.adapter.hashFile(file)).hash === entry.hash) return;
+    }
+    await this.observe('upsert', file);
+  }
   async flushAll(): Promise<void> {
     for (const handle of this.timers.values()) window.clearTimeout(handle);
     this.timers.clear();
