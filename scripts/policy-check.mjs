@@ -20,6 +20,10 @@ requireTrue(versions[manifest.version] === manifest.minAppVersion, 'versions.jso
 for (const file of ['README.md', 'LICENSE', 'SECURITY.md', 'main.js', 'styles.css']) {
   try { await access(path.join(root, file)); } catch { failures.push(`${file} is missing`); }
 }
+const readme = await readFile(path.join(root, 'README.md'), 'utf8').catch(() => '');
+if (manifest.version.startsWith('0.')) {
+  requireTrue(readme.includes(`**Pre-release:** \`${manifest.version}\``), 'README prerelease version does not match manifest');
+}
 const sourceFiles = (await walk(root)).filter((file) => file !== import.meta.filename && !file.includes(`${path.sep}node_modules${path.sep}`) && !file.includes(`${path.sep}.git${path.sep}`));
 for (const file of sourceFiles) {
   if (/\.(?:ts|js|mjs|json|md|yml|yaml)$/.test(file)) {
