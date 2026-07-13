@@ -4,7 +4,12 @@ import { PluginStore } from './plugin-store';
 import { ProtocolClient } from './protocol-client';
 
 export class ConflictModal extends Modal {
-  constructor(app: App, private readonly client: ProtocolClient, private readonly store: PluginStore) { super(app); }
+  constructor(
+    app: App,
+    private readonly client: ProtocolClient,
+    private readonly store: PluginStore,
+    private readonly onConflictsChanged: () => Promise<void>,
+  ) { super(app); }
   onOpen(): void { this.titleEl.setText('Central sync conflicts'); void this.renderList(); }
   onClose(): void { this.contentEl.empty(); }
 
@@ -64,6 +69,7 @@ export class ConflictModal extends Modal {
     try {
       const sequence = await this.store.takeClientSequence();
       await this.client.resolveConflict(conflict.conflictId, resolution, sequence, `plugin-resolve-${sequence}-${randomId()}`, merged);
+      await this.onConflictsChanged();
       new Notice(`Resolved ${conflict.path}`);
       await this.renderList();
     } catch (error) { new Notice(message(error)); }

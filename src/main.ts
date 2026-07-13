@@ -98,6 +98,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
       await this.engine.start();
       await this.engine.flush();
       await this.engine.catchUp();
+      await this.refreshConflictCount();
       if (this.store.state.lastError !== null) await this.store.update((state) => { state.lastError = null; });
       if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
       this.pendingRetry = null;
@@ -175,7 +176,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.addCommand({ id: 'view-status', name: 'View sync status', callback: () => new Notice(`Central Sync: ${this.status}; lag ${this.lag}; conflicts ${this.conflicts}`) });
     this.addCommand({ id: 'view-conflicts', name: 'View conflicts', callback: () => {
       if (!this.client) new Notice('Pair this device before viewing conflicts.');
-      else new ConflictModal(this.app, this.client, this.store).open();
+      else new ConflictModal(this.app, this.client, this.store, () => this.refreshConflictCount()).open();
     } });
     this.addCommand({ id: 'reconnect', name: 'Reconnect', callback: () => void this.startClient().catch((error) => new Notice(message(error))) });
     this.addCommand({ id: 'reset-local-state', name: 'Reset local sync state', callback: () => void this.resetLocalState() });
@@ -220,6 +221,11 @@ export default class CentralVaultSyncPlugin extends Plugin {
     const conflict = this.conflicts > 0 ? ` · ${this.conflicts} conflict${this.conflicts === 1 ? '' : 's'}` : '';
     this.statusEl.setText(`Central Sync: ${this.status}${this.lag ? ` · ${this.lag} pending` : ''}${conflict}`);
     this.statusEl.setAttr('aria-label', 'Central Sync status; click to sync now');
+  }
+  private async refreshConflictCount(): Promise<void> {
+    if (!this.client) { this.conflicts = 0; this.renderStatus(); return; }
+    this.conflicts = (await this.client.conflicts()).filter((conflict) => conflict.status === 'unresolved').length;
+    this.renderStatus();
   }
   private handleConflict(result: OperationResult | string): void {
     this.conflicts += 1; this.setStatus('conflict', this.lag);
