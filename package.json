@@ -1,0 +1,35 @@
+{
+  "name": "central-vault-sync",
+  "version": "0.1.0",
+  "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit --skipLibCheck && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "test": "node --import tsx --import ./test/register-obsidian.mjs --test test/*.test.ts",
+    "lint": "eslint .",
+    "policy": "node scripts/policy-check.mjs",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run policy"
+  },
+  "keywords": ["vault", "sync", "self-hosted", "offline"],
+  "license": "MIT",
+  "dependencies": {
+    "@webobsidian/sync-core": "file:vendor/webobsidian-sync-core-0.1.0.tgz"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@types/node": "^22.15.17",
+    "esbuild": "^0.25.5",
+    "eslint": "^9.39.4",
+    "eslint-plugin-obsidianmd": "^0.4.0",
+    "globals": "^17.6.0",
+    "jiti": "^2.6.1",
+    "obsidian": "latest",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.59.1"
+  },
+  "engines": { "node": ">=20" }
+}

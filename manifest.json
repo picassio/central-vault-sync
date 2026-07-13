@@ -1,0 +1,10 @@
+{
+  "id": "central-vault-sync",
+  "name": "Central Vault Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.13.0",
+  "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
+  "author": "WebObsidian contributors",
+  "authorUrl": "https://github.com/picassio/central-vault-sync",
+  "isDesktopOnly": false
+}

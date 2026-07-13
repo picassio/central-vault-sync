@@ -1,0 +1,86 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { sha256Text, type SyncEvent, type SyncOperation } from '@webobsidian/sync-core';
+import { PluginStore } from '../src/plugin-store.js';
+
+function fakePlugin(initial: unknown = null) {
+  const secrets = new Map<string, string>();
+  const writes: unknown[] = [];
+  return {
+    plugin: {
+      app: { secretStorage: {
+        getSecret: (key: string) => secrets.get(key) ?? null,
+        setSecret: (key: string, value: string) => { secrets.set(key, value); },
+      } },
+      loadData: async () => initial,
+      saveData: async (value: unknown) => { writes.push(structuredClone(value)); },
+    } as never,
+    secrets, writes,
+  };
+}
+
+function event(sequence: number): SyncEvent {
+  return {
+    sequence, eventId: `event_plugin_store_${sequence}`, actor: { type: 'device', id: 'device_plugin_store_remote' },
+    operation: 'modify', entryId: 'entry_plugin_store_1', path: 'Note.md', baseRevision: 1,
+    revision: 2, hash: sha256Text('remote'), size: 6, occurredAt: '2026-07-13T00:00:00.000Z',
+  };
+}
+
+test('device token remains only in SecretStorage and is never serialized with plugin state', async () => {
+  const fake = fakePlugin();
+  const store = new PluginStore(fake.plugin);
+  await store.load();
+  store.setToken('raw-device-token-that-must-never-be-saved');
+  await store.update((state) => {
+    state.deviceId = 'device_plugin_store_1'; state.deviceName = 'Desktop'; state.vaultId = 'vault_plugin_store_1';
+  });
+  assert.equal((await store.getDevice())?.token, 'raw-device-token-that-must-never-be-saved');
+  assert.equal(JSON.stringify(fake.writes).includes('raw-device-token'), false);
+  store.clearToken();
+  assert.equal(await store.getDevice(), null);
+});
+
+test('client sequence and cursor are durable and strictly monotonic', async () => {
+  const fake = fakePlugin();
+  const store = new PluginStore(fake.plugin);
+  await store.load();
+  assert.equal(await store.takeClientSequence(), 1);
+  assert.equal(await store.takeClientSequence(), 2);
+  await store.putCursor(7);
+  await assert.rejects(() => store.putCursor(6), /backwards/);
+  assert.equal(store.state.cursor, 7);
+  assert.equal(store.state.nextClientSequence, 3);
+});
+
+test('apply intents and blob-reference operations survive reload without storing note content', async () => {
+  const fake = fakePlugin();
+  const store = new PluginStore(fake.plugin);
+  await store.load();
+  const operation: SyncOperation = {
+    operation: 'modify', entryId: 'entry_plugin_store_1', baseRevision: 1,
+    clientSequence: 1, idempotencyKey: 'plugin-store-operation-1',
+    content: { hash: sha256Text('private note body'), size: 17, blobHash: sha256Text('private note body') },
+  };
+  await store.putOperation(operation);
+  await store.putApplyIntent({ event: event(2), createdAt: '2026-07-13T00:00:00.000Z' });
+  const serialized = fake.writes.at(-1)!;
+  assert.equal(JSON.stringify(serialized).includes('private note body'), false);
+
+  const reloaded = new PluginStore(fakePlugin(serialized).plugin);
+  await reloaded.load();
+  assert.deepEqual(await reloaded.operations(), [operation]);
+  assert.equal((await reloaded.applyIntents())[0]?.event.sequence, 2);
+});
+
+test('exact duplicate operation converges but changed idempotency payload is rejected', async () => {
+  const store = new PluginStore(fakePlugin().plugin);
+  await store.load();
+  const operation: SyncOperation = {
+    operation: 'mkdir', path: 'Folder', kind: 'directory', clientSequence: 1, idempotencyKey: 'plugin-store-idempotency-1',
+  };
+  await store.putOperation(operation);
+  await store.putOperation(operation);
+  await assert.rejects(() => store.putOperation({ ...operation, path: 'Other' }), /payload changed/);
+  assert.equal((await store.operations()).length, 1);
+});
