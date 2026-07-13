@@ -16,7 +16,7 @@ import {
   type Conflict,
   type SyncEntry,
   type SyncOperation,
-} from '@webobsidian/sync-core';
+} from '@picassio/sync-core';
 
 export class ProtocolError extends Error {
   constructor(public readonly code: string, message: string, public readonly status: number, public readonly retryable = false) {

@@ -1,5 +1,5 @@
 import { Modal, Notice, Platform, Plugin, Setting, TFile, type TAbstractFile } from 'obsidian';
-import { OrderedSyncClient, type OperationResult, type SyncConnectionStatus } from '@webobsidian/sync-core';
+import { OrderedSyncClient, type OperationResult, type SyncConnectionStatus } from '@picassio/sync-core';
 import { LocalMutationQueue } from './local-queue';
 import { ObsidianSyncAdapter } from './obsidian-adapter';
 import { PluginStore } from './plugin-store';

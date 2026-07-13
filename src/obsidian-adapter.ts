@@ -8,7 +8,7 @@ import {
   type SyncEntry,
   type SyncEvent,
   type SyncLocalAdapter,
-} from '@webobsidian/sync-core';
+} from '@picassio/sync-core';
 import { PluginStore } from './plugin-store';
 import { ProtocolClient } from './protocol-client';
 

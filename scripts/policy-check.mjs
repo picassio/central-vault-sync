@@ -37,7 +37,7 @@ requireTrue(!/(?:node:|child_process|electron|require\(["'](?:fs|path|os))/.test
 requireTrue(!/\beval\s*\(/.test(bundle), 'bundle contains eval');
 requireTrue(Buffer.byteLength(bundle) < 2 * 1024 * 1024, 'bundle exceeds 2 MiB');
 if (!manifest.version.startsWith('0.')) {
-  requireTrue(pkg.dependencies['@webobsidian/sync-core'] === manifest.version, 'stable plugin must use the matching public sync-core package');
+  requireTrue(pkg.dependencies['@picassio/sync-core'] === manifest.version, 'stable plugin must use the matching public sync-core package');
 }
 if (failures.length) {
   console.error(failures.map((failure) => `- ${failure}`).join('\n'));

@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Pre-release:** `0.1.9` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
+> **Pre-release:** `0.1.10` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
 
@@ -74,7 +74,7 @@ npm install
 npm run check
 ```
 
-The repository temporarily consumes the exact locally packed `@webobsidian/sync-core@0.1.1` artifact under `vendor/` for reproducible integration before npm publication. The stable release switches to the public npm package without source duplication.
+The plugin consumes the public, exact `@picassio/sync-core@0.1.2` package used by the server, browser, and headless client; protocol code is not duplicated in this repository.
 
 ## License
 

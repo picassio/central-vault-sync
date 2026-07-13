@@ -1,5 +1,5 @@
 import { Modal, Notice, Setting, TFile, type App } from 'obsidian';
-import type { Conflict } from '@webobsidian/sync-core';
+import type { Conflict } from '@picassio/sync-core';
 import { PluginStore } from './plugin-store';
 import { ProtocolClient } from './protocol-client';
 

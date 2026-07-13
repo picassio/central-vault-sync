@@ -4,7 +4,7 @@ import test from 'node:test';
 import { TFile } from 'obsidian';
 import { LocalMutationQueue } from '../src/local-queue';
 import { PluginStore, type PendingPath, type PluginState } from '../src/plugin-store';
-import type { SyncEntry, SyncOperation } from '@webobsidian/sync-core';
+import type { SyncEntry, SyncOperation } from '@picassio/sync-core';
 
 test('concurrent file uploads cannot overtake reserved client sequences', async () => {
   const first = Object.assign(new TFile(), { path: 'A.md', name: 'A.md', extension: 'md' });

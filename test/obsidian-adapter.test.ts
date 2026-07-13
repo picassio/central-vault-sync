@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MarkdownView, TFile, TFolder } from 'obsidian';
-import { sha256Bytes, sha256Text, type SyncEntry, type SyncEvent } from '@webobsidian/sync-core';
+import { sha256Bytes, sha256Text, type SyncEntry, type SyncEvent } from '@picassio/sync-core';
 import { ObsidianSyncAdapter } from '../src/obsidian-adapter.js';
 import { PluginStore } from '../src/plugin-store.js';
 

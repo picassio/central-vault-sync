@@ -5,7 +5,7 @@ import type {
   SyncClientPersistence,
   SyncEntry,
   SyncOperation,
-} from '@webobsidian/sync-core';
+} from '@picassio/sync-core';
 
 export interface PendingPath {
   path: string;

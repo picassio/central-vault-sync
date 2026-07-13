@@ -3,11 +3,11 @@ import {
   assertServerPathAllowed,
   isServerPathExcluded,
   type SyncOperation,
-} from '@webobsidian/sync-core';
+} from '@picassio/sync-core';
 import { ObsidianSyncAdapter } from './obsidian-adapter';
 import { PluginStore, type PendingPath } from './plugin-store';
 import { ProtocolClient } from './protocol-client';
-import type { OrderedSyncClient } from '@webobsidian/sync-core';
+import type { OrderedSyncClient } from '@picassio/sync-core';
 
 export class LocalMutationQueue {
   private timers = new Map<string, number>();

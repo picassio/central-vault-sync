@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sha256Text, type SyncEntry, type SyncEvent, type SyncOperation } from '@webobsidian/sync-core';
+import { sha256Text, type SyncEntry, type SyncEvent, type SyncOperation } from '@picassio/sync-core';
 import { PluginStore } from '../src/plugin-store.js';
 
 function fakePlugin(initial: unknown = null) {

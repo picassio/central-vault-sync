@@ -9,10 +9,10 @@ import {
   OperationsRequestSchema,
   OperationsResponseSchema,
   PROTOCOL_VERSION,
-} from '@webobsidian/sync-core';
+} from '@picassio/sync-core';
 
 test('plugin consumes the published Sync Protocol 1.0 golden fixtures', async () => {
-  const fixtureUrl = new URL(import.meta.resolve('@webobsidian/sync-core/fixtures/protocol-v1.json'));
+  const fixtureUrl = new URL(import.meta.resolve('@picassio/sync-core/fixtures/protocol-v1.json'));
   const fixture = JSON.parse(await readFile(fixtureUrl, 'utf8')) as Record<string, unknown>;
   assert.equal(PROTOCOL_VERSION, '1.0');
   HandshakeRequestSchema.parse(fixture.handshakeRequest);
