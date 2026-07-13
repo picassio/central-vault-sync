@@ -121,8 +121,10 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
       this.expected.set(to, { hash, revision });
       return;
     }
-    if (!source && destination instanceof TFile && hash && (await this.hashFile(destination)).hash === hash) {
-      this.expected.set(to, { hash, revision });
+    if (!source && destination instanceof TFile && hash) {
+      if ((await this.hashFile(destination)).hash === hash) this.expected.set(to, { hash, revision });
+      // The rename itself is already materialized. A differing destination is later local work and must
+      // remain untouched while this metadata event advances the projection used by its follow-up modify.
       return;
     }
     await this.assertNoLocalWork(from, source instanceof TFolder);

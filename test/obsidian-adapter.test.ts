@@ -87,6 +87,37 @@ test('mock Vault adapter applies rename and delete idempotently while retaining 
   assert.equal(persistence.entryById('entry_adapter_remote_1')?.deleted, true);
 });
 
+test('rename echo advances metadata without replacing a locally modified destination', async () => {
+  const vault = new FakeVault();
+  const persistence = store(); await persistence.load();
+  const before = 'before rename\n'; const after = 'modified after rename\n';
+  let bootstrap = true;
+  const client = { async download() {
+    if (!bootstrap) throw new Error('rename echo must not download');
+    return { bytes: new TextEncoder().encode(before).buffer, hash: sha256Text(before) };
+  } };
+  const adapter = new ObsidianSyncAdapter(
+    vault as never, { trashFile: async () => {} } as never, emptyWorkspace(), persistence, client as never,
+    async () => true, () => {},
+  );
+  await adapter.bootstrap([entry('Old.md', before)]);
+  bootstrap = false;
+  const file = vault.getAbstractFileByPath('Old.md'); assert.ok(file instanceof TFile);
+  await vault.rename(file, 'New.md');
+  await vault.modifyBinary(file, new TextEncoder().encode(after).buffer);
+  await persistence.queuePath({ path: 'New.md', oldPath: 'Old.md', action: 'upsert', observedAt: '2026-07-13T00:00:00.500Z' });
+  const renamed: SyncEvent = {
+    sequence: 2, eventId: 'event_adapter_rename_echo_2', actor: { type: 'device', id: 'device_adapter_local' },
+    operation: 'rename', entryId: 'entry_adapter_remote_1', oldPath: 'Old.md', path: 'New.md',
+    baseRevision: 1, revision: 2, hash: sha256Text(before), size: before.length, occurredAt: '2026-07-13T00:00:01.000Z',
+  };
+
+  await adapter.apply(renamed);
+  assert.equal(await vault.read(file), after);
+  assert.equal(persistence.entryByPath('New.md')?.revision, 2);
+  assert.equal(persistence.state.pendingPaths.length, 1);
+});
+
 test('download hash mismatch fails before writing canonical local bytes', async () => {
   const vault = new FakeVault();
   const persistence = store(); await persistence.load();
