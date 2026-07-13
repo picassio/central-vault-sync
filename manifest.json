@@ -1,7 +1,7 @@
 {
   "id": "central-vault-sync",
   "name": "Central Vault Sync",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.11.4",
   "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
   "author": "WebObsidian contributors",

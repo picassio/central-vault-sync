@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Pre-release:** `0.1.2` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
+> **Pre-release:** `0.1.3` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
 
