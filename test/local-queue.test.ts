@@ -3,8 +3,8 @@ import { setTimeout as nodeSetTimeout } from 'node:timers';
 import test from 'node:test';
 import { TFile } from 'obsidian';
 import { LocalMutationQueue } from '../src/local-queue';
-import type { PendingPath, PluginState } from '../src/plugin-store';
-import type { SyncOperation } from '@webobsidian/sync-core';
+import { PluginStore, type PendingPath, type PluginState } from '../src/plugin-store';
+import type { SyncEntry, SyncOperation } from '@webobsidian/sync-core';
 
 test('concurrent file uploads cannot overtake reserved client sequences', async () => {
   const first = Object.assign(new TFile(), { path: 'A.md', name: 'A.md', extension: 'md' });
@@ -58,6 +58,51 @@ test('concurrent file uploads cannot overtake reserved client sequences', async 
   assert.deepEqual(queued.map((operation) => operation.clientSequence), [1, 2]);
   assert.deepEqual(queued.map((operation) => 'path' in operation ? operation.path : ''), ['A.md', 'B.md']);
   assert.deepEqual(state.pendingPaths, []);
+});
+
+test('rename event bursts preserve identity and rehash destination content in sequence order', async () => {
+  const oldHash = '1'.repeat(64); const newHash = '2'.repeat(64);
+  const file = Object.assign(new TFile(), { path: 'New.md', name: 'New.md', extension: 'md' });
+  const files = new Map([[file.path, file]]);
+  const store = await projectedStore(projectedEntry('Old.md', oldHash));
+  store.state.modifyDebounceMs = 0;
+  const queued: SyncOperation[] = [];
+  const queue = new LocalMutationQueue(
+    { getAbstractFileByPath: (path: string) => files.get(path) ?? null } as never, '.config-test', store,
+    { upload: async () => {} } as never, { queue: async (operation: SyncOperation) => { queued.push(operation); } } as never,
+    { hashFile: async () => ({ hash: newHash, size: 1, bytes: new Uint8Array([2]).buffer }), consumeExpected: async () => false } as never,
+    () => {},
+  );
+
+  await queue.observe('rename', file, 'Old.md');
+  await queue.observe('upsert', file);
+  await waitFor(() => queued.length === 2);
+  assert.deepEqual(queued.map((operation) => operation.operation), ['rename', 'modify']);
+  assert.deepEqual(queued.map((operation) => operation.clientSequence), [1, 2]);
+  assert.equal('entryId' in queued[1]! ? queued[1].entryId : null, 'entry_rename_burst');
+  assert.equal(store.state.pendingPaths.length, 0);
+});
+
+test('rename immediately followed by delete collapses to deletion of the original identity', async () => {
+  const file = Object.assign(new TFile(), { path: 'Transient.md', name: 'Transient.md', extension: 'md' });
+  const files = new Map([[file.path, file]]);
+  const store = await projectedStore(projectedEntry('Original.md', '3'.repeat(64)));
+  store.state.modifyDebounceMs = 0;
+  const queued: SyncOperation[] = [];
+  const queue = new LocalMutationQueue(
+    { getAbstractFileByPath: (path: string) => files.get(path) ?? null } as never, '.config-test', store,
+    { upload: async () => {} } as never, { queue: async (operation: SyncOperation) => { queued.push(operation); } } as never,
+    { hashFile: async () => ({ hash: '3'.repeat(64), size: 1, bytes: new Uint8Array([3]).buffer }), consumeExpected: async () => false } as never,
+    () => {},
+  );
+
+  await queue.observe('rename', file, 'Original.md');
+  files.delete(file.path);
+  await queue.observe('delete', file);
+  await waitFor(() => queued.length === 1);
+  assert.equal(queued[0]?.operation, 'delete');
+  assert.equal('entryId' in queued[0] ? queued[0].entryId : null, 'entry_rename_burst');
+  assert.equal(store.state.pendingPaths.length, 0);
 });
 
 test('startup reconciliation does not persist or sequence unchanged projected files', async () => {
@@ -130,6 +175,22 @@ test('runtime upload failure reports offline work without consuming its sequence
   assert.equal(state.pendingPaths.length, 1);
   assert.equal(state.pendingPaths[0]?.path, 'Offline.md');
 });
+
+function projectedEntry(path: string, hash: string): SyncEntry {
+  return {
+    entryId: 'entry_rename_burst', path, kind: 'file', revision: 1, hash, size: 1,
+    modifiedAt: '2026-07-13T00:00:00.000Z', deleted: false, sequence: 1,
+  };
+}
+async function projectedStore(entry: SyncEntry): Promise<PluginStore> {
+  const store = new PluginStore({
+    app: { secretStorage: { getSecret: () => null, setSecret: () => {} } },
+    loadData: async () => null, saveData: async () => {},
+  } as never);
+  await store.load();
+  await store.replaceEntries([entry]);
+  return store;
+}
 
 async function waitFor(check: () => boolean, timeout = 2_000): Promise<void> {
   const deadline = Date.now() + timeout;

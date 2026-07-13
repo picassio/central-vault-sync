@@ -11,6 +11,7 @@ export interface PendingPath {
   path: string;
   action: 'upsert' | 'rename' | 'delete';
   oldPath?: string;
+  followUpAction?: 'upsert' | 'delete';
   observedAt: string;
 }
 export interface PluginState {
@@ -130,7 +131,15 @@ export class PluginStore implements SyncClientPersistence {
   }
   async queuePath(pending: PendingPath) {
     await this.update((state) => {
-      state.pendingPaths = [...state.pendingPaths.filter((item) => item.path !== pending.path), pending];
+      const existing = state.pendingPaths.find((item) => item.path === pending.path);
+      const merged = existing?.action === 'rename' && pending.action !== 'rename'
+        ? {
+            ...existing,
+            observedAt: pending.observedAt,
+            ...(pending.action === 'delete' ? { followUpAction: 'delete' as const } : {}),
+          }
+        : pending;
+      state.pendingPaths = [...state.pendingPaths.filter((item) => item.path !== pending.path), merged];
     });
   }
   async removePendingPath(path: string) {

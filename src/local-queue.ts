@@ -30,7 +30,8 @@ export class LocalMutationQueue {
     if (path === this.configDir || path.startsWith(`${this.configDir}/`) || excluded(path, this.store.state.excludeGlobs)) return;
     const pending = { path, action, ...(oldPath ? { oldPath: normalizePath(oldPath) } : {}), observedAt: new Date().toISOString() };
     await this.store.queuePath(pending);
-    this.schedule(pending, action === 'upsert' ? this.store.state.modifyDebounceMs : 0);
+    const queued = this.store.state.pendingPaths.find((item) => item.path === path) ?? pending;
+    this.schedule(queued, queued.action === 'upsert' ? this.store.state.modifyDebounceMs : 0);
   }
   async reconcile(file: TAbstractFile): Promise<void> {
     const path = normalizePath(file.path);
@@ -92,10 +93,15 @@ export class LocalMutationQueue {
       const entry = pending.oldPath ? this.store.entryByPath(pending.oldPath) : null;
       if (entry) {
         const { clientSequence, idempotencyKey } = await this.operationIdentity();
-        operation = {
-          operation: 'rename', entryId: entry.entryId, baseRevision: entry.revision,
-          path: pending.path, clientSequence, idempotencyKey,
-        };
+        operation = pending.followUpAction === 'delete'
+          ? {
+              operation: entry.kind === 'directory' ? 'rmdir' : 'delete', entryId: entry.entryId,
+              baseRevision: entry.revision, clientSequence, idempotencyKey,
+            }
+          : {
+              operation: 'rename', entryId: entry.entryId, baseRevision: entry.revision,
+              path: pending.path, clientSequence, idempotencyKey,
+            };
       }
     } else {
       const file = this.vault.getAbstractFileByPath(pending.path);
@@ -103,7 +109,8 @@ export class LocalMutationQueue {
         await this.store.removePendingPath(pending.path);
         return;
       }
-      const entry = this.store.entryByPath(pending.path);
+      const entry = this.store.entryByPath(pending.path)
+        ?? (pending.oldPath ? this.store.entryByPath(pending.oldPath) : null);
       if (file instanceof TFolder) {
         if (!entry) {
           const { clientSequence, idempotencyKey } = await this.operationIdentity();
@@ -134,6 +141,22 @@ export class LocalMutationQueue {
     }
     if (operation) await this.engine.queue(operation);
     await this.store.removePendingPath(pending.path);
+    if (pending.action === 'rename') await this.queueRenameFollowUp(pending);
+  }
+
+  private async queueRenameFollowUp(pending: PendingPath): Promise<void> {
+    if (pending.followUpAction === 'delete') return;
+    const file = this.vault.getAbstractFileByPath(pending.path);
+    const action = pending.followUpAction ?? (file instanceof TFile ? 'upsert' : null);
+    if (!action) return;
+    const followUp: PendingPath = {
+      path: pending.path, action,
+      ...(action === 'upsert' && pending.oldPath ? { oldPath: pending.oldPath } : {}),
+      observedAt: new Date().toISOString(),
+    };
+    await this.store.queuePath(followUp);
+    const queued = this.store.state.pendingPaths.find((item) => item.path === followUp.path) ?? followUp;
+    this.schedule(queued, action === 'upsert' ? this.store.state.modifyDebounceMs : 0);
   }
 
   private async operationIdentity(): Promise<{ clientSequence: number; idempotencyKey: string }> {

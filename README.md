@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Pre-release:** `0.1.8` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
+> **Pre-release:** `0.1.9` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
 
@@ -41,7 +41,7 @@ A public release attaches those same three files to a GitHub release whose tag e
 - WebSocket messages are sequence-only wake-ups. REST manifest/change/file/blob endpoints remain authoritative.
 - Fallback polling runs while the app is active; reconnect uses bounded exponential backoff.
 - Create, modify, rename, delete, attachments, empty folders, Unicode paths, and case-sensitive identities use the native Vault API.
-- Local editor bursts debounce for 750 ms by default. Plugin unload attempts to flush and always leaves a durable marker for unfinished paths.
+- Local editor bursts debounce for 750 ms by default. Rename/modify bursts preserve the original identity, commit rename first, and rehash the destination; rename/delete collapses safely to deletion of the original identity. Plugin unload attempts to flush and always leaves a durable marker for unfinished paths.
 - Status refreshes the authoritative unresolved-conflict count after startup, every successful sync, and each resolution. Commands: **Sync now**, **Pause or resume**, **View status**, **View conflicts**, **Reconnect**, and **Reset local sync state**.
 
 ### Mobile lifecycle
