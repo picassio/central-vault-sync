@@ -1,4 +1,4 @@
-import { normalizePath, TFile, TFolder, type FileManager, type Vault } from 'obsidian';
+import { MarkdownView, normalizePath, TFile, TFolder, type FileManager, type Vault, type Workspace } from 'obsidian';
 import {
   assertServerPathAllowed,
   sha256Bytes,
@@ -19,6 +19,7 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   constructor(
     private readonly vault: Vault,
     private readonly fileManager: FileManager,
+    private readonly workspace: Workspace,
     private readonly store: PluginStore,
     private readonly client: ProtocolClient,
     private readonly approveLargeDownload: (path: string, size: number) => Promise<boolean>,
@@ -40,6 +41,7 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   }
 
   async apply(event: SyncEvent): Promise<void> {
+    if (this.store.state.paused) throw new Error('remote apply deferred while sync is paused');
     if (event.operation === 'delete' || event.operation === 'rmdir') {
       await this.remove(event.path, event.revision);
     } else if (event.operation === 'rename') {
@@ -95,6 +97,7 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
       throw new Error(`large download awaiting approval: ${entry.path}`);
     }
     const existing = this.vault.getAbstractFileByPath(entry.path);
+    await this.assertNoLocalWork(entry.path, false);
     if (existing instanceof TFile) {
       const current = await this.hashFile(existing);
       if (current.hash === entry.hash) { this.expected.set(entry.path, { hash: entry.hash, revision: entry.revision }); return; }
@@ -113,6 +116,8 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   private async rename(from: string, to: string, hash: string | null, revision: number): Promise<void> {
     const source = this.vault.getAbstractFileByPath(from);
     const destination = this.vault.getAbstractFileByPath(to);
+    await this.assertNoLocalWork(from, source instanceof TFolder);
+    await this.assertNoLocalWork(to, destination instanceof TFolder);
     if (!source) return;
     if (destination && destination !== source) throw new Error(`rename destination exists: ${to}`);
     await this.ensureParent(to);
@@ -121,10 +126,35 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   }
   private async remove(path: string, revision: number): Promise<void> {
     const target = this.vault.getAbstractFileByPath(path);
+    await this.assertNoLocalWork(path, target instanceof TFolder);
     if (!target) return;
     this.expected.set(path, { hash: null, revision });
     await this.fileManager.trashFile(target);
   }
+  private async assertNoLocalWork(path: string, subtree: boolean): Promise<void> {
+    const matches = (candidate: string): boolean => candidate === path || (subtree && candidate.startsWith(`${path}/`));
+    const pending = this.store.state.pendingPaths.some((item) => matches(item.path) || Boolean(item.oldPath && matches(item.oldPath)));
+    const queued = this.store.state.operations.some((operation) => {
+      if ('path' in operation && matches(operation.path)) return true;
+      if ('entryId' in operation) {
+        const entry = this.store.entryById(operation.entryId);
+        if (entry && matches(entry.path)) return true;
+      }
+      return false;
+    });
+    if (pending || queued) throw new Error(`local changes pending for ${path}; remote apply deferred`);
+
+    for (const leaf of this.workspace.getLeavesOfType('markdown')) {
+      if (!(leaf.view instanceof MarkdownView) || !leaf.view.file || !matches(leaf.view.file.path)) continue;
+      const diskFile = this.vault.getAbstractFileByPath(leaf.view.file.path);
+      if (!(diskFile instanceof TFile) || !TEXT_EXTENSIONS.has(diskFile.extension.toLowerCase())) continue;
+      const diskText = await this.vault.read(diskFile);
+      if (leaf.view.editor.getValue() !== diskText) {
+        throw new Error(`open editor has unsaved changes for ${leaf.view.file.path}; remote apply deferred`);
+      }
+    }
+  }
+
   private async ensureParent(filePath: string): Promise<void> {
     const slash = filePath.lastIndexOf('/');
     if (slash > 0) await this.ensureFolder(filePath.slice(0, slash));

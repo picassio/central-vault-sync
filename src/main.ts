@@ -18,8 +18,11 @@ export default class CentralVaultSyncPlugin extends Plugin {
   private lag = 0;
   private conflicts = 0;
   private pendingRetry: number | null = null;
+  private active = false;
+  private starting: Promise<void> | null = null;
 
   async onload(): Promise<void> {
+    this.active = true;
     this.store = new PluginStore(this);
     await this.store.load();
     this.statusEl = this.addStatusBarItem();
@@ -34,10 +37,16 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.registerVaultEvents();
     this.registerForegroundEvents();
     this.renderStatus();
-    if (await this.store.getDevice()) await this.startClient();
+    if (await this.store.getDevice()) {
+      this.setStatus('syncing', 0);
+      this.app.workspace.onLayoutReady(() => {
+        if (this.active) void this.startClient().catch((error) => this.handleStartError(error));
+      });
+    }
   }
 
   onunload(): void {
+    this.active = false;
     if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
     this.pendingRetry = null;
     void this.localQueue?.flushAll().catch(() => {});
@@ -114,7 +123,14 @@ export default class CentralVaultSyncPlugin extends Plugin {
     }, null, 2);
   }
 
-  private async startClient(): Promise<void> {
+  private startClient(): Promise<void> {
+    if (this.starting) return this.starting;
+    const start = this.startClientOnce().finally(() => { if (this.starting === start) this.starting = null; });
+    this.starting = start;
+    return start;
+  }
+
+  private async startClientOnce(): Promise<void> {
     if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
     this.pendingRetry = null;
     this.engine?.stop(); this.localQueue?.dispose();
@@ -122,7 +138,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     if (!device) return;
     this.client = new ProtocolClient(this.store.state.serverUrl, device.token);
     this.adapter = new ObsidianSyncAdapter(
-      this.app.vault, this.app.fileManager, this.store, this.client,
+      this.app.vault, this.app.fileManager, this.app.workspace, this.store, this.client,
       (path, size) => this.approveLargeDownload(path, size),
       (result) => this.handleConflict(result),
     );
@@ -136,6 +152,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
       (error) => { void this.handleLocalQueueError(error); },
     );
     await this.scanLocalChanges();
+    if (!this.active) { this.localQueue.dispose(); this.engine.stop(); return; }
     await this.syncNow().catch(() => {});
   }
 
@@ -203,6 +220,11 @@ export default class CentralVaultSyncPlugin extends Plugin {
   private handleConflict(result: OperationResult | string): void {
     this.conflicts += 1; this.setStatus('conflict', this.lag);
     new Notice(typeof result === 'string' ? result : `Central Sync conflict${result.conflictId ? ` ${result.conflictId}` : ''}. Server content was not overwritten.`);
+  }
+  private async handleStartError(error: unknown): Promise<void> {
+    if (!this.active) return;
+    this.setStatus('offline', this.lag);
+    await this.recordError(error);
   }
   private async handleLocalQueueError(error: unknown): Promise<void> {
     this.setStatus('offline', this.lag);

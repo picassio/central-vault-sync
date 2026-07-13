@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { TFile, TFolder } from 'obsidian';
+import { MarkdownView, TFile, TFolder } from 'obsidian';
 import { sha256Bytes, sha256Text, type SyncEntry, type SyncEvent } from '@webobsidian/sync-core';
 import { ObsidianSyncAdapter } from '../src/obsidian-adapter.js';
 import { PluginStore } from '../src/plugin-store.js';
@@ -34,6 +34,15 @@ function entry(path: string, content: string, revision = 1): SyncEntry {
     modifiedAt: '2026-07-13T00:00:00.000Z', deleted: false, sequence: revision,
   };
 }
+function modifyEvent(path: string, content: string): SyncEvent {
+  return {
+    sequence: 2, eventId: 'event_adapter_modify_2', actor: { type: 'device', id: 'device_adapter_remote' },
+    operation: 'modify', entryId: 'entry_adapter_remote_1', path, baseRevision: 1, revision: 2,
+    hash: sha256Text(content), size: new TextEncoder().encode(content).byteLength,
+    occurredAt: '2026-07-13T00:00:01.000Z',
+  };
+}
+function emptyWorkspace() { return { getLeavesOfType: () => [] } as never; }
 
 test('mock Vault adapter bootstraps verified bytes and suppresses only the expected hash echo', async () => {
   const vault = new FakeVault();
@@ -41,7 +50,7 @@ test('mock Vault adapter bootstraps verified bytes and suppresses only the expec
   const remote = 'remote body\n';
   const client = { async download() { return { bytes: new TextEncoder().encode(remote).buffer, hash: sha256Text(remote) }; } };
   const adapter = new ObsidianSyncAdapter(
-    vault as never, { trashFile: async () => {} } as never, persistence, client as never,
+    vault as never, { trashFile: async () => {} } as never, emptyWorkspace(), persistence, client as never,
     async () => true, () => {},
   );
   await adapter.bootstrap([entry('Folder/Note.md', remote)]);
@@ -62,7 +71,7 @@ test('mock Vault adapter applies rename and delete idempotently while retaining 
   const adapter = new ObsidianSyncAdapter(
     vault as never,
     { trashFile: async (file: TFile) => { trash.push(file.path); vault.nodes.delete(file.path); vault.bytes.delete(file.path); } } as never,
-    persistence, client as never, async () => true, () => {},
+    emptyWorkspace(), persistence, client as never, async () => true, () => {},
   );
   await adapter.bootstrap([entry('Old.md', content)]);
   const renamed: SyncEvent = {
@@ -82,7 +91,48 @@ test('download hash mismatch fails before writing canonical local bytes', async 
   const vault = new FakeVault();
   const persistence = store(); await persistence.load();
   const client = { async download() { const bytes = new TextEncoder().encode('tampered').buffer; return { bytes, hash: sha256Bytes(new Uint8Array(bytes)) }; } };
-  const adapter = new ObsidianSyncAdapter(vault as never, { trashFile: async () => {} } as never, persistence, client as never, async () => true, () => {});
+  const adapter = new ObsidianSyncAdapter(vault as never, { trashFile: async () => {} } as never, emptyWorkspace(), persistence, client as never, async () => true, () => {});
   await assert.rejects(() => adapter.bootstrap([entry('Safe.md', 'expected')]), /verification failed/);
   assert.equal(vault.getAbstractFileByPath('Safe.md'), null);
+});
+
+test('remote update cannot replace a durable local pending path', async () => {
+  const vault = new FakeVault();
+  const base = 'base\n'; const remote = 'remote\n';
+  await vault.createBinary('Open.md', new TextEncoder().encode(base).buffer);
+  const persistence = store(); await persistence.load();
+  await persistence.replaceEntries([entry('Open.md', base)]);
+  await persistence.queuePath({ path: 'Open.md', action: 'upsert', observedAt: '2026-07-13T00:00:00.500Z' });
+  const client = { async download() { return { bytes: new TextEncoder().encode(remote).buffer, hash: sha256Text(remote) }; } };
+  const adapter = new ObsidianSyncAdapter(
+    vault as never, { trashFile: async () => {} } as never, emptyWorkspace(), persistence, client as never,
+    async () => true, () => {},
+  );
+
+  await assert.rejects(() => adapter.apply(modifyEvent('Open.md', remote)), /local changes pending/);
+  const file = vault.getAbstractFileByPath('Open.md'); assert.ok(file instanceof TFile);
+  assert.equal(await vault.read(file), base);
+  assert.equal(persistence.entryByPath('Open.md')?.revision, 1);
+});
+
+test('remote update cannot replace an unsaved open editor before its Vault event', async () => {
+  const vault = new FakeVault();
+  const base = 'base\n'; const remote = 'remote\n'; const local = 'unsaved local\n';
+  const file = await vault.createBinary('Open.md', new TextEncoder().encode(base).buffer);
+  const persistence = store(); await persistence.load();
+  await persistence.replaceEntries([entry('Open.md', base)]);
+  const view = Object.assign(Object.create(MarkdownView.prototype) as MarkdownView, {
+    file, editor: { getValue: () => local },
+  });
+  const workspace = { getLeavesOfType: () => [{ view }] } as never;
+  const client = { async download() { return { bytes: new TextEncoder().encode(remote).buffer, hash: sha256Text(remote) }; } };
+  const adapter = new ObsidianSyncAdapter(
+    vault as never, { trashFile: async () => {} } as never, workspace, persistence, client as never,
+    async () => true, () => {},
+  );
+
+  await assert.rejects(() => adapter.apply(modifyEvent('Open.md', remote)), /open editor has unsaved changes/);
+  assert.equal(await vault.read(file), base);
+  assert.equal(view.editor.getValue(), local);
+  assert.equal(persistence.entryByPath('Open.md')?.revision, 1);
 });

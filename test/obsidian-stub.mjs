@@ -5,6 +5,7 @@ export const normalizePath = (value) => value.replace(/^\/+|\/+$/g, '').replace(
 export const Platform = { isDesktop: false, isMobile: true, isMobileApp: true, isIosApp: false, isAndroidApp: true };
 export async function requestUrl() { throw new Error('requestUrl test stub was not configured'); }
 export class Modal {}
+export class MarkdownView {}
 export class Notice {}
 export class Plugin {}
 export class PluginSettingTab {}

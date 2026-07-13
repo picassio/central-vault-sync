@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Pre-release:** `0.1.5` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
+> **Pre-release:** `0.1.6` is for backed-up beta testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
 
@@ -14,6 +14,7 @@ Revision-safe two-way synchronization between an Obsidian vault and a self-hoste
 - Persists queue markers, blob-reference operations, cursor, and apply intents before acknowledging work.
 - Verifies every downloaded and uploaded file by SHA-256 and byte length.
 - Suppresses remote-apply echoes by expected path and hash, not a timer-only flag.
+- Defers remote replacement, rename, or deletion while the affected path has durable local work or an unsaved open editor; overlapping edits become server conflict copies rather than disappearing.
 - Keeps credentials out of the vault and plugin `data.json` through Obsidian SecretStorage.
 
 ## Requirements
@@ -36,7 +37,7 @@ A public release attaches those same three files to a GitHub release whose tag e
 
 ## Behavior
 
-- Initial load captures a snapshot-consistent server manifest, reconciles durable local work, then applies ordered changes.
+- Initial load waits for Obsidian's workspace layout, captures a snapshot-consistent server manifest, reconciles durable local work, then applies ordered changes.
 - WebSocket messages are sequence-only wake-ups. REST manifest/change/file/blob endpoints remain authoritative.
 - Fallback polling runs while the app is active; reconnect uses bounded exponential backoff.
 - Create, modify, rename, delete, attachments, empty folders, Unicode paths, and case-sensitive identities use the native Vault API.
