@@ -206,7 +206,10 @@ class ResetStateModal extends Modal {
     this.contentEl.createEl('p', { text: 'Cursor, projections, and pending operations will be reset. Vault files are kept and reconciled on reconnect.' });
     new Setting(this.contentEl)
       .addButton((button) => button.setButtonText('Cancel').onClick(() => this.finish(false)))
-      .addButton((button) => button.setDestructive().setButtonText('Reset').onClick(() => this.finish(true)));
+      .addButton((button) => {
+        button.setButtonText('Reset').onClick(() => this.finish(true));
+        button.buttonEl.addClass('mod-warning');
+      });
   }
   onClose(): void { if (!this.settled) this.done(false); this.contentEl.empty(); }
 }

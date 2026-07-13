@@ -1,4 +1,4 @@
-import { Notice, PluginSettingTab, type App, type SettingDefinitionItem } from 'obsidian';
+import { Notice, PluginSettingTab, Setting, type App } from 'obsidian';
 import type { PluginState } from './plugin-store';
 
 export interface SyncPluginController {
@@ -33,62 +33,54 @@ export class CentralSyncSettingTab extends PluginSettingTab {
     await this.controller.store.save();
   }
 
-  getSettingDefinitions(): SettingDefinitionItem[] {
-    const state = this.controller.store.state;
-    return [
-      {
-        type: 'group', heading: 'Connection and behavior', items: [
-          { name: 'Server URL', desc: 'HTTPS URL of the authoritative vault server. HTTP is accepted only for loopback development.', control: { type: 'text', key: 'serverUrl', placeholder: 'https://vault.example.com' } },
-          { name: 'Device name', desc: 'Shown in the server device list and conflict-copy names.', control: { type: 'text', key: 'deviceName' } },
-          {
-            name: 'Connection', desc: state.deviceId ? `Paired device ${state.deviceId}; cursor ${state.cursor}.` : 'Enter a one-time code created by a server administrator.',
-            render: (setting) => {
-              setting.addButton((button) => button.setButtonText('Test').onClick(async () => {
-                try { new Notice(await this.controller.testConnection()); } catch (error) { new Notice(message(error)); }
-              }));
-              setting.addButton((button) => button.setDestructive().setButtonText('Unpair').setDisabled(!state.deviceId).onClick(async () => {
-                await this.controller.unpair(); this.update();
-              }));
-            },
-          },
-          {
-            name: 'One-time pairing code', desc: 'The code is exchanged once and is never saved or logged.',
-            render: (setting) => {
-              let code = '';
-              setting.addText((text) => text.setPlaceholder('Paste code').onChange((value) => { code = value.trim(); }));
-              setting.addButton((button) => button.setCta().setButtonText('Pair').setDisabled(Boolean(state.deviceId)).onClick(async () => {
-                try { await this.controller.pair(code); new Notice('Central sync paired'); this.update(); }
-                catch (error) { new Notice(message(error)); }
-              }));
-            },
-          },
-          { name: 'Paused', desc: 'Keep durable local queue markers but do not transfer changes.', control: { type: 'toggle', key: 'paused' } },
-          { name: 'Fallback polling interval', desc: 'Seconds between ordered REST catch-up checks when no wake-up arrives.', control: { type: 'number', key: 'fallbackPollSeconds', min: 5, max: 300, step: 1 } },
-          { name: 'Modify debounce', desc: 'Milliseconds to coalesce noisy editor write bursts. Default: 750 ms.', control: { type: 'number', key: 'modifyDebounceMs', min: 250, max: 10_000, step: 50 } },
-          { name: 'Mobile large-file confirmation', desc: 'Ask before downloading a file at or above this size in MiB. Default: 100 MiB.', control: { type: 'number', key: 'mobileLargeFileMiB', min: 1, max: 10_240, step: 1 } },
-          { name: 'Additional exclude globs', desc: 'Comma-separated stricter device exclusions. Server exclusions can never be re-included.', control: { type: 'textarea', key: 'excludeGlobs' } },
-        ],
-      },
-      {
-        type: 'group', heading: 'Status and diagnostics', items: [
-          { name: 'Server-enforced exclusions', desc: `${this.app.vault.configDir}/**, .git/**, .trash/**, temporary/OS files, and internal sync metadata never synchronize.` },
-          {
-            name: 'Operations', desc: `${state.operations.length} durable operation(s), ${state.pendingPaths.length} path marker(s), ${state.applyIntents.length} apply intent(s).`,
-            render: (setting) => {
-              setting.addButton((button) => button.setCta().setButtonText('Sync now').setDisabled(!state.deviceId || state.paused).onClick(async () => {
-                try { await this.controller.syncNow(); new Notice('Central sync complete'); this.update(); }
-                catch (error) { new Notice(message(error)); }
-              }));
-              setting.addButton((button) => button.setButtonText('Copy redacted diagnostics').onClick(async () => {
-                await navigator.clipboard.writeText(this.controller.diagnostics()); new Notice('Redacted diagnostics copied');
-              }));
-            },
-          },
-          { name: 'Mobile lifecycle', desc: 'Synchronization runs while the app is foregrounded. It cannot run while the operating system suspends the app.' },
-          ...(state.lastError ? [{ name: 'Last error', desc: state.lastError }] : []),
-        ],
-      },
-    ];
+  display(): void {
+    const { containerEl } = this; const state = this.controller.store.state;
+    containerEl.empty();
+    new Setting(containerEl).setName('Connection and behavior').setHeading();
+    new Setting(containerEl).setName('Server URL').setDesc('HTTPS URL of the authoritative vault server. HTTP is accepted only for loopback development.')
+      .addText((text) => text.setPlaceholder('https://vault.example.com').setValue(state.serverUrl).onChange((value) => void this.setControlValue('serverUrl', value)));
+    new Setting(containerEl).setName('Device name').setDesc('Shown in the server device list and conflict-copy names.')
+      .addText((text) => text.setValue(state.deviceName).onChange((value) => void this.setControlValue('deviceName', value)));
+    new Setting(containerEl).setName('Connection').setDesc(state.deviceId ? `Paired device ${state.deviceId}; cursor ${state.cursor}.` : 'Enter a one-time code created by a server administrator.')
+      .addButton((button) => button.setButtonText('Test').onClick(async () => {
+        try { new Notice(await this.controller.testConnection()); } catch (error) { new Notice(message(error)); }
+      }))
+      .addButton((button) => {
+        button.setButtonText('Unpair').setDisabled(!state.deviceId).onClick(async () => { await this.controller.unpair(); this.display(); });
+        button.buttonEl.addClass('mod-warning');
+      });
+    let code = '';
+    new Setting(containerEl).setName('One-time pairing code').setDesc('The code is exchanged once and is never saved or logged.')
+      .addText((text) => text.setPlaceholder('Paste code').onChange((value) => { code = value.trim(); }))
+      .addButton((button) => button.setCta().setButtonText('Pair').setDisabled(Boolean(state.deviceId)).onClick(async () => {
+        try { await this.controller.pair(code); new Notice('Central sync paired'); this.display(); } catch (error) { new Notice(message(error)); }
+      }));
+    new Setting(containerEl).setName('Paused').setDesc('Keep durable local queue markers but do not transfer changes.')
+      .addToggle((toggle) => toggle.setValue(state.paused).onChange((value) => void this.setControlValue('paused', value)));
+    this.numberSetting('Fallback polling interval', 'Seconds between ordered REST catch-up checks when no wake-up arrives.', 'fallbackPollSeconds', 5, 300, 1);
+    this.numberSetting('Modify debounce', 'Milliseconds to coalesce noisy editor write bursts. Default: 750 ms.', 'modifyDebounceMs', 250, 10_000, 50);
+    this.numberSetting('Mobile large-file confirmation', 'Ask before downloading a file at or above this size in MiB. Default: 100 MiB.', 'mobileLargeFileMiB', 1, 10_240, 1);
+    new Setting(containerEl).setName('Additional exclude globs').setDesc('Comma-separated stricter device exclusions. Server exclusions can never be re-included.')
+      .addTextArea((text) => text.setValue(state.excludeGlobs.join(', ')).onChange((value) => void this.setControlValue('excludeGlobs', value)));
+
+    new Setting(containerEl).setName('Status and diagnostics').setHeading();
+    new Setting(containerEl).setName('Server-enforced exclusions').setDesc(`${this.app.vault.configDir}/**, .git/**, .trash/**, temporary/OS files, and internal sync metadata never synchronize.`);
+    new Setting(containerEl).setName('Operations').setDesc(`${state.operations.length} durable operation(s), ${state.pendingPaths.length} path marker(s), ${state.applyIntents.length} apply intent(s).`)
+      .addButton((button) => button.setCta().setButtonText('Sync now').setDisabled(!state.deviceId || state.paused).onClick(async () => {
+        try { await this.controller.syncNow(); new Notice('Central sync complete'); this.display(); } catch (error) { new Notice(message(error)); }
+      }))
+      .addButton((button) => button.setButtonText('Copy redacted diagnostics').onClick(async () => {
+        await navigator.clipboard.writeText(this.controller.diagnostics()); new Notice('Redacted diagnostics copied');
+      }));
+    new Setting(containerEl).setName('Mobile lifecycle').setDesc('Synchronization runs while the app is foregrounded. It cannot run while the operating system suspends the app.');
+    if (state.lastError) new Setting(containerEl).setName('Last error').setDesc(state.lastError);
+  }
+
+  private numberSetting(name: string, description: string, key: EditableKey, minimum: number, maximum: number, step: number): void {
+    new Setting(this.containerEl).setName(name).setDesc(description).addText((text) => {
+      text.inputEl.type = 'number'; text.inputEl.min = String(minimum); text.inputEl.max = String(maximum); text.inputEl.step = String(step);
+      text.setValue(String(this.getControlValue(key))).onChange((value) => void this.setControlValue(key, value));
+    });
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "central-vault-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
   "main": "main.js",
   "type": "module",
@@ -13,7 +13,12 @@
     "policy": "node scripts/policy-check.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run policy"
   },
-  "keywords": ["vault", "sync", "self-hosted", "offline"],
+  "keywords": [
+    "vault",
+    "sync",
+    "self-hosted",
+    "offline"
+  ],
   "license": "MIT",
   "dependencies": {
     "@webobsidian/sync-core": "file:vendor/webobsidian-sync-core-0.1.0.tgz"
@@ -31,5 +36,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.59.1"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }

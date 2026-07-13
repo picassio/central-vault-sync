@@ -16,7 +16,7 @@ Revision-safe two-way synchronization between an Obsidian vault and a self-hoste
 
 ## Requirements
 
-- Obsidian 1.13.0 or newer on desktop, Android, or iOS.
+- Obsidian 1.11.4 or newer on desktop, Android, or iOS.
 - A reachable WebObsidian server with Central Sync Protocol 1.0.
 - HTTPS for every non-loopback server URL.
 - A 10-minute one-use pairing code created in WebObsidian **Settings → Central Sync**.
