@@ -21,4 +21,7 @@ test('plugin consumes the published Sync Protocol 1.0 golden fixtures', async ()
   ChangesResponseSchema.parse(fixture.changesResponse);
   OperationsRequestSchema.parse(fixture.operationsRequest);
   OperationsResponseSchema.parse(fixture.operationsResponse);
+  assert.throws(() => HandshakeResponseSchema.parse({
+    ...(fixture.handshakeResponse as object), protocolVersion: '1.1',
+  }), /protocolVersion/);
 });

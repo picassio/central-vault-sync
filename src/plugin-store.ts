@@ -66,7 +66,7 @@ export class PluginStore implements SyncClientPersistence {
     await this.save();
   }
 
-  async getDevice(): Promise<ClientDeviceIdentity | null> {
+  async getDevice(): Promise<(ClientDeviceIdentity & { token: string; vaultId: string }) | null> {
     const token = this.plugin.app.secretStorage.getSecret(this.secretId);
     if (!token || !this.state.deviceId || !this.state.vaultId) return null;
     return {

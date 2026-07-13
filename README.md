@@ -71,7 +71,7 @@ npm install
 npm run check
 ```
 
-The repository temporarily consumes the exact locally packed `@webobsidian/sync-core@0.1.0` artifact under `vendor/` for reproducible integration before npm publication. The stable release switches to the public npm package without source duplication.
+The repository temporarily consumes the exact locally packed `@webobsidian/sync-core@0.1.1` artifact under `vendor/` for reproducible integration before npm publication. The stable release switches to the public npm package without source duplication.
 
 ## License
 
