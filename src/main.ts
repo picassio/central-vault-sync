@@ -133,7 +133,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     );
     this.localQueue = new LocalMutationQueue(
       this.app.vault, this.app.vault.configDir, this.store, this.client, this.engine, this.adapter,
-      (text) => new Notice(text),
+      (error) => { void this.handleLocalQueueError(error); },
     );
     await this.scanLocalChanges();
     await this.syncNow().catch(() => {});
@@ -204,8 +204,14 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.conflicts += 1; this.setStatus('conflict', this.lag);
     new Notice(typeof result === 'string' ? result : `Central Sync conflict${result.conflictId ? ` ${result.conflictId}` : ''}. Server content was not overwritten.`);
   }
+  private async handleLocalQueueError(error: unknown): Promise<void> {
+    this.setStatus('offline', this.lag);
+    await this.recordError(error);
+    new Notice(`Central Sync: ${safeMessage(error)}`);
+    this.schedulePendingRetry();
+  }
   private async recordError(error: unknown): Promise<void> {
-    await this.store.update((state) => { state.lastError = message(error).replace(/Bearer\s+\S+/gi, 'Bearer <redacted>'); });
+    await this.store.update((state) => { state.lastError = safeMessage(error); });
   }
   private async approveLargeDownload(path: string, size: number): Promise<boolean> {
     if (!Platform.isMobile) return true;
@@ -257,3 +263,4 @@ function randomId(bytes: number): string {
 }
 function safeOrigin(value: string): string | null { try { return new URL(value).origin; } catch { return null; } }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+function safeMessage(error: unknown): string { return message(error).replace(/Bearer\s+\S+/gi, 'Bearer <redacted>'); }

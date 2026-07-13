@@ -14,7 +14,7 @@ test('settings expose one searchable definition source and normalize persisted c
   const tab = new CentralSyncSettingTab(controller.app, controller);
   (tab as unknown as { app: App }).app = controller.app;
   const groups = tab.getSettingDefinitions() as SettingDefinitionGroup[];
-  assert.deepEqual(groups.map((group) => group.heading), ['Connection and behavior', 'Status and diagnostics']);
+  assert.deepEqual(groups.map((group) => group.heading), [undefined, 'Status and diagnostics']);
   const names = groups.flatMap((group) => group.items ?? []).filter((item) => 'name' in item).map((item) => item.name);
   assert.ok(names.includes('Server URL'));
   assert.ok(names.includes('One-time pairing code'));

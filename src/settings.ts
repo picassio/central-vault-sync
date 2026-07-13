@@ -47,7 +47,7 @@ export class CentralSyncSettingTab extends PluginSettingTab {
     const state = this.controller.store.state;
     return [
       {
-        type: 'group', heading: 'Connection and behavior', items: [
+        type: 'group', items: [
           { name: 'Server URL', desc: 'HTTPS URL of the authoritative vault server. HTTP is accepted only for loopback development.', control: { type: 'text', key: 'serverUrl', placeholder: 'https://vault.example.com' } },
           { name: 'Device name', desc: 'Shown in the server device list and conflict-copy names.', control: { type: 'text', key: 'deviceName' } },
           {

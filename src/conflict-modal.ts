@@ -25,7 +25,7 @@ export class ConflictModal extends Modal {
 
   private async renderConflict(conflict: Conflict): Promise<void> {
     this.contentEl.empty();
-    this.contentEl.createEl('h3', { text: conflict.path });
+    new Setting(this.contentEl).setName(conflict.path).setHeading();
     const binary = !/\.(md|markdown|txt|json|css|js|ts|tsx|jsx|html|xml|yaml|yml|csv|svg|canvas)$/i.test(conflict.path);
     let merged = '';
     if (binary) {

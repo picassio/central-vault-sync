@@ -60,6 +60,39 @@ test('concurrent file uploads cannot overtake reserved client sequences', async 
   assert.deepEqual(state.pendingPaths, []);
 });
 
+test('runtime upload failure reports offline work without consuming its sequence or marker', async () => {
+  const file = Object.assign(new TFile(), { path: 'Offline.md', name: 'Offline.md', extension: 'md' });
+  const state = {
+    paused: false, modifyDebounceMs: 0, excludeGlobs: [], pendingPaths: [], operations: [],
+    nextClientSequence: 1,
+  } as unknown as PluginState;
+  const store = {
+    state,
+    async queuePath(pending: PendingPath) { state.pendingPaths = [pending]; },
+    async removePendingPath(path: string) { state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path); },
+    async takeClientSequence() { const value = state.nextClientSequence; state.nextClientSequence += 1; return value; },
+    entryByPath() { return null; },
+  };
+  let reportError!: (error: unknown) => void;
+  const reported = new Promise<unknown>((resolve) => { reportError = resolve; });
+  const queue = new LocalMutationQueue(
+    { getAbstractFileByPath: () => file } as never,
+    '.config-test', store as never,
+    { upload: async () => { throw new Error('network unavailable'); } } as never,
+    { queue: async () => { throw new Error('operation must not be queued'); } } as never,
+    { hashFile: async () => ({ hash: 'c'.repeat(64), size: 1, bytes: new Uint8Array([1]).buffer }), consumeExpected: async () => false } as never,
+    reportError,
+  );
+
+  await queue.observe('upsert', file);
+  const error = await reported;
+  assert.match(error instanceof Error ? error.message : '', /network unavailable/);
+  assert.equal(state.nextClientSequence, 1);
+  assert.equal(state.operations.length, 0);
+  assert.equal(state.pendingPaths.length, 1);
+  assert.equal(state.pendingPaths[0]?.path, 'Offline.md');
+});
+
 async function waitFor(check: () => boolean, timeout = 2_000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {

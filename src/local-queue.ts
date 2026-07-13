@@ -19,7 +19,7 @@ export class LocalMutationQueue {
     private readonly client: ProtocolClient,
     private readonly engine: OrderedSyncClient,
     private readonly adapter: ObsidianSyncAdapter,
-    private readonly notice: (message: string) => void,
+    private readonly onError: (error: unknown) => void,
   ) {}
 
   async restore(): Promise<void> {
@@ -47,9 +47,7 @@ export class LocalMutationQueue {
     if (prior !== undefined) window.clearTimeout(prior);
     this.timers.set(pending.path, window.setTimeout(() => {
       this.timers.delete(pending.path);
-      void this.runFlush(pending).catch((error) => {
-        this.notice(`Central Sync: ${error instanceof Error ? error.message : String(error)}`);
-      });
+      void this.runFlush(pending).catch((error) => { this.onError(error); });
     }, delay));
   }
 
