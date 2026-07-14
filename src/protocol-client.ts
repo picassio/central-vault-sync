@@ -19,7 +19,13 @@ import {
 } from '@picassio/sync-core';
 
 export class ProtocolError extends Error {
-  constructor(public readonly code: string, message: string, public readonly status: number, public readonly retryable = false) {
+  constructor(
+    public readonly code: string,
+    message: string,
+    public readonly status: number,
+    public readonly retryable = false,
+    public readonly retryAfterSeconds?: number,
+  ) {
     super(message);
   }
 }
@@ -155,9 +161,15 @@ export class ProtocolClient implements SyncClientTransport {
       throw: false,
     });
     if (response.status < 200 || response.status >= 300) {
-      const payload = response.json as { error?: { code?: string; message?: string; retryable?: boolean } } | undefined;
+      const payload = response.json as { error?: { code?: string; message?: string; retryable?: boolean; details?: { retryAfter?: number } } } | undefined;
       const error = payload?.error;
-      throw new ProtocolError(error?.code ?? `http_${response.status}`, error?.message ?? `HTTP ${response.status}`, response.status, error?.retryable);
+      const retryAfter = Number(error?.details?.retryAfter ?? response.headers['retry-after'] ?? response.headers['Retry-After']);
+      const retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : undefined;
+      const baseMessage = error?.message ?? `HTTP ${response.status}`;
+      const displayMessage = error?.code === 'rate_limited' && retryAfterSeconds
+        ? `${baseMessage}; retry in ${retryAfterSeconds} seconds`
+        : baseMessage;
+      throw new ProtocolError(error?.code ?? `http_${response.status}`, displayMessage, response.status, error?.retryable, retryAfterSeconds);
     }
     return response;
   }

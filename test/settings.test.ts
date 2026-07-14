@@ -19,6 +19,17 @@ test('settings expose one searchable definition source and normalize persisted c
   assert.ok(names.includes('Server URL'));
   assert.ok(names.includes('One-time pairing code'));
   assert.ok(names.includes('Copy redacted diagnostics') === false);
+  const unpairedConnection = groups.flatMap((group) => group.items ?? []).find((item) => 'name' in item && item.name === 'Connection');
+  const unpairedDescription = unpairedConnection && 'desc' in unpairedConnection ? unpairedConnection.desc : undefined;
+  if (typeof unpairedDescription !== 'string') throw new Error('Connection description must be text');
+  assert.match(unpairedDescription, /select or create the intended server vault/);
+  controller.store.state.deviceId = 'obs_settings_device_123456';
+  controller.store.state.vaultId = 'vault_desktop_123456789';
+  const pairedGroups = tab.getSettingDefinitions() as SettingDefinitionGroup[];
+  const pairedConnection = pairedGroups.flatMap((group) => group.items ?? []).find((item) => 'name' in item && item.name === 'Connection');
+  const pairedDescription = pairedConnection && 'desc' in pairedConnection ? pairedConnection.desc : undefined;
+  if (typeof pairedDescription !== 'string') throw new Error('Connection description must be text');
+  assert.match(pairedDescription, /server vault vault_desktop_123456789/);
 
   await tab.setControlValue('deviceName', '   ');
   await tab.setControlValue('fallbackPollSeconds', 999);

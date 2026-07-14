@@ -51,7 +51,9 @@ export class CentralSyncSettingTab extends PluginSettingTab {
           { name: 'Server URL', desc: 'HTTPS URL of the authoritative vault server. HTTP is accepted only for loopback development.', control: { type: 'text', key: 'serverUrl', placeholder: 'https://vault.example.com' } },
           { name: 'Device name', desc: 'Shown in the server device list and conflict-copy names.', control: { type: 'text', key: 'deviceName' } },
           {
-            name: 'Connection', desc: state.deviceId ? `Paired device ${state.deviceId}; cursor ${state.cursor}.` : 'Enter a one-time code created by a server administrator.',
+            name: 'Connection', desc: state.deviceId
+              ? `Paired device ${state.deviceId}; server vault ${state.vaultId ?? 'unknown'}; cursor ${state.cursor}.`
+              : 'Unpaired. In WebObsidian, select or create the intended server vault and verify its displayed name/ID before generating a code.',
             render: (setting) => {
               setting.addButton((button) => button.setButtonText('Test').onClick(async () => {
                 try { new Notice(await this.controller.testConnection()); } catch (error) { new Notice(message(error)); }
@@ -63,7 +65,7 @@ export class CentralSyncSettingTab extends PluginSettingTab {
             },
           },
           {
-            name: 'One-time pairing code', desc: 'The code is exchanged once and is never saved or logged.',
+            name: 'One-time pairing code', desc: 'The code is exchanged once and is never saved or logged. It binds this local vault to the server vault shown in WebObsidian; the device name does not create a vault.',
             render: (setting) => {
               let code = '';
               setting.addText((text) => text.setPlaceholder('Paste code').onChange((value) => { code = value.trim(); }));
