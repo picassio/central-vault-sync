@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Pre-release:** `0.1.12` remains backed-up beta software. Its GitHub release is published as a normal
+> **Pre-release:** `0.1.13` remains backed-up beta software. Its GitHub release is published as a normal
 > release so the Community directory can resolve and scan the assets. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
@@ -60,7 +60,11 @@ The status bar and notices report unresolved conflicts without blocking unrelate
 ## Privacy and network behavior
 
 - Connects only to the server URL configured by the user.
+- Enumerates folders and files in the vault during startup reconciliation so it can detect local work, compare the
+  durable projection, and apply exclusions. It does not use enumeration to access files outside the vault.
 - Sends vault file paths, content/hashes, device name, revisions, queue operations, acknowledgements, pairing exchange, and diagnostics needed for synchronization.
+- Clipboard access is write-only and occurs only when the user explicitly selects **Copy redacted diagnostics**. The
+  plugin writes its redacted diagnostic text and never reads existing clipboard content.
 - Does not use analytics, advertising, telemetry, third-party APIs, or remote code execution.
 - The device bearer token is stored only through Obsidian SecretStorage and is never written to plugin data, logs, diagnostics, or the vault. Encryption at rest depends on a working platform keychain; Obsidian shows its own warning and may use an unencrypted fallback when no secret store is available. Configure a keychain on shared/untrusted systems.
 - Redacted diagnostics include server origin, device/vault IDs, cursor/queue counts, platform flags, exclusions, and sanitized errors; they exclude credentials and note content.

@@ -1,6 +1,6 @@
 {
   "name": "central-vault-sync",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
   "main": "main.js",
   "type": "module",
