@@ -189,9 +189,9 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.registerEvent(this.app.vault.on('rename', (file, oldPath) => void this.observe('rename', file, oldPath)));
   }
   private registerForegroundEvents(): void {
-    const resume = () => { if (!document.hidden && !this.store.state.paused) void this.syncNow().catch(() => {}); };
-    this.registerDomEvent(document, 'visibilitychange', resume);
-    this.registerDomEvent(window, 'focus', resume);
+    const resume = () => { if (!activeDocument.hidden && !this.store.state.paused) void this.syncNow().catch(() => {}); };
+    this.registerDomEvent(activeDocument, 'visibilitychange', resume);
+    this.registerDomEvent(activeWindow, 'focus', resume);
     this.registerEvent(this.app.workspace.on('active-leaf-change', () => resume()));
   }
   private async observe(action: 'upsert' | 'delete' | 'rename', file: TAbstractFile, oldPath?: string): Promise<void> {

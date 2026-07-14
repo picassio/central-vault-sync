@@ -22,7 +22,7 @@ for (const file of ['README.md', 'LICENSE', 'SECURITY.md', 'main.js', 'styles.cs
 }
 const readme = await readFile(path.join(root, 'README.md'), 'utf8').catch(() => '');
 if (manifest.version.startsWith('0.')) {
-  requireTrue(readme.includes(`**Pre-release:** \`${manifest.version}\``), 'README prerelease version does not match manifest');
+  requireTrue(readme.includes(`**Community review release:** \`${manifest.version}\``), 'README review-release version does not match manifest');
 }
 const sourceFiles = (await walk(root)).filter((file) => file !== import.meta.filename && !file.includes(`${path.sep}node_modules${path.sep}`) && !file.includes(`${path.sep}.git${path.sep}`));
 for (const file of sourceFiles) {
