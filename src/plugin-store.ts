@@ -170,6 +170,10 @@ export class PluginStore implements SyncClientPersistence {
       for (const item of prepared) {
         const current = currentByPath.get(item.pending.path);
         if (removedPaths.has(item.pending.path) || !current || !samePendingPath(current, item.pending)) continue;
+        // A parent marker may have changed while its child blob was uploading. Never publish the child until
+        // that exact parent marker has itself become a durable operation (or was proven to need no operation).
+        // Otherwise the server can receive a file create before its directory and fail the whole batch.
+        if (hasPendingAncestor(item.pending.path, currentByPath, removedPaths)) continue;
         const clientSequence = state.nextClientSequence;
         const operation = item.operation(clientSequence, `plugin-${clientSequence}-${randomId()}`);
         if (operation) {
@@ -198,6 +202,20 @@ export class PluginStore implements SyncClientPersistence {
 export function samePendingPath(left: PendingPath, right: PendingPath): boolean {
   return left.path === right.path && left.action === right.action && left.oldPath === right.oldPath
     && left.followUpAction === right.followUpAction && left.observedAt === right.observedAt;
+}
+
+function hasPendingAncestor(
+  path: string,
+  currentByPath: ReadonlyMap<string, PendingPath>,
+  removedPaths: ReadonlySet<string>,
+): boolean {
+  let slash = path.lastIndexOf('/');
+  while (slash > 0) {
+    const ancestor = path.slice(0, slash);
+    if (currentByPath.has(ancestor) && !removedPaths.has(ancestor)) return true;
+    slash = ancestor.lastIndexOf('/');
+  }
+  return false;
 }
 
 function randomId(): string {

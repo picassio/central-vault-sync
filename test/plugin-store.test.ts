@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sha256Text, type SyncEntry, type SyncEvent, type SyncOperation } from '@picassio/sync-core';
-import { PluginStore } from '../src/plugin-store.js';
+import { PluginStore, type PendingPath } from '../src/plugin-store.js';
 
 function fakePlugin(initial: unknown = null) {
   const secrets = new Map<string, string>();
@@ -124,6 +124,43 @@ test('batch path checkpoint and prepared-operation commit are atomic and ignore 
   assert.equal(durable.pendingPaths.length, 1);
   assert.equal(durable.operations.length, 1);
   assert.equal(durable.nextClientSequence, 2);
+});
+
+test('a stale parent marker blocks child publication until the parent is durably prepared', async () => {
+  const store = new PluginStore(fakePlugin().plugin);
+  await store.load();
+  const parent: PendingPath = { path: 'Parent', action: 'upsert', observedAt: '2026-07-16T12:00:00.000Z' };
+  const newerParent: PendingPath = { ...parent, observedAt: '2026-07-16T12:00:01.000Z' };
+  const child: PendingPath = { path: 'Parent/Child.md', action: 'upsert', observedAt: '2026-07-16T12:00:00.000Z' };
+  store.state.pendingPaths = [newerParent, child];
+
+  const committed = await store.commitPreparedPaths([
+    { pending: parent, operation: (clientSequence, idempotencyKey) => ({
+      operation: 'mkdir', path: parent.path, kind: 'directory', clientSequence, idempotencyKey,
+    }) },
+    { pending: child, operation: (clientSequence, idempotencyKey) => ({
+      operation: 'create', path: child.path, kind: 'file', clientSequence, idempotencyKey,
+      content: { hash: sha256Text('child'), size: 5, blobHash: sha256Text('child') },
+    }) },
+  ]);
+
+  assert.deepEqual(committed, []);
+  assert.deepEqual(store.state.pendingPaths, [newerParent, child]);
+  assert.deepEqual(store.state.operations, []);
+
+  const retried = await store.commitPreparedPaths([
+    { pending: newerParent, operation: (clientSequence, idempotencyKey) => ({
+      operation: 'mkdir', path: newerParent.path, kind: 'directory', clientSequence, idempotencyKey,
+    }) },
+    { pending: child, operation: (clientSequence, idempotencyKey) => ({
+      operation: 'create', path: child.path, kind: 'file', clientSequence, idempotencyKey,
+      content: { hash: sha256Text('child'), size: 5, blobHash: sha256Text('child') },
+    }) },
+  ]);
+  assert.deepEqual(retried, [newerParent, child]);
+  const operations = await store.operations();
+  assert.equal(operations[0]?.operation, 'mkdir');
+  assert.equal(operations[1]?.operation, 'create');
 });
 
 test('terminal operation batches are removed in one durable state write', async () => {
