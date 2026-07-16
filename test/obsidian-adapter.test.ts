@@ -62,6 +62,26 @@ test('mock Vault adapter bootstraps verified bytes and suppresses only the expec
   assert.equal(persistence.entryByPath('Folder/Note.md')?.revision, 1);
 });
 
+test('bootstrap preserves local bytes protected by a durable pending-path marker', async () => {
+  const vault = new FakeVault();
+  const local = 'local unscanned edit';
+  await vault.createBinary('Note.md', new TextEncoder().encode(local).buffer);
+  const persistence = store(); await persistence.load();
+  await persistence.queuePath({ path: 'Note.md', action: 'upsert', observedAt: '2026-07-16T00:00:00.000Z' });
+  let downloads = 0;
+  const client = { async download() { downloads += 1; return { bytes: new ArrayBuffer(0), hash: sha256Text('remote') }; } };
+  const adapter = new ObsidianSyncAdapter(
+    vault as never, { trashFile: async () => {} } as never, emptyWorkspace(), persistence, client as never,
+    async () => true, () => {},
+  );
+  await adapter.bootstrap([entry('Note.md', 'remote')]);
+  const file = vault.getAbstractFileByPath('Note.md');
+  assert.ok(file instanceof TFile);
+  assert.equal(await vault.read(file), local);
+  assert.equal(downloads, 0);
+  assert.equal(persistence.state.pendingPaths.length, 1);
+});
+
 test('mock Vault adapter applies rename and delete idempotently while retaining tombstone projection', async () => {
   const vault = new FakeVault();
   const persistence = store(); await persistence.load();

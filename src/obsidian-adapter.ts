@@ -27,14 +27,17 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
   ) {}
 
   async bootstrap(entries: SyncEntry[]): Promise<void> {
-    const protectedPaths = new Set(this.store.state.operations.flatMap((operation) => {
-      if ('path' in operation && (operation.operation === 'create' || operation.operation === 'mkdir')) return [operation.path];
-      if ('entryId' in operation) {
-        const prior = this.store.entryById(operation.entryId);
-        return prior ? [prior.path] : [];
-      }
-      return [];
-    }));
+    const protectedPaths = new Set([
+      ...this.store.state.pendingPaths.flatMap((pending) => [pending.path, ...(pending.oldPath ? [pending.oldPath] : [])]),
+      ...this.store.state.operations.flatMap((operation) => {
+        if ('path' in operation && (operation.operation === 'create' || operation.operation === 'mkdir')) return [operation.path];
+        if ('entryId' in operation) {
+          const prior = this.store.entryById(operation.entryId);
+          return prior ? [prior.path] : [];
+        }
+        return [];
+      }),
+    ]);
     const live = entries.filter((entry) => !entry.deleted).sort((a, b) => depth(a.path) - depth(b.path));
     for (const entry of live) if (!protectedPaths.has(entry.path)) await this.applyEntry(entry);
     await this.store.replaceEntries(entries);
@@ -76,13 +79,15 @@ export class ObsidianSyncAdapter implements SyncLocalAdapter {
     return true;
   }
 
-  async hashFile(file: TFile): Promise<{ hash: string; size: number; text?: string; bytes?: ArrayBuffer }> {
+  async hashFile(file: TFile, includeContent = true): Promise<{ hash: string; size: number; text?: string; bytes?: ArrayBuffer }> {
     if (TEXT_EXTENSIONS.has(file.extension.toLowerCase())) {
       const text = await this.vault.read(file);
-      return { hash: sha256Text(text), size: new TextEncoder().encode(text).byteLength, text };
+      const result = { hash: sha256Text(text), size: new TextEncoder().encode(text).byteLength };
+      return includeContent ? { ...result, text } : result;
     }
     const bytes = await this.vault.readBinary(file);
-    return { hash: sha256Bytes(new Uint8Array(bytes)), size: bytes.byteLength, bytes };
+    const result = { hash: sha256Bytes(new Uint8Array(bytes)), size: bytes.byteLength };
+    return includeContent ? { ...result, bytes } : result;
   }
 
   private async applyEntry(entry: SyncEntry): Promise<void> {

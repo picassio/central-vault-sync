@@ -9,6 +9,7 @@ import {
   type SettingDefinitionGroup,
 } from 'obsidian';
 import type { PluginState } from './plugin-store';
+import { formatProgress, type SyncProgressSnapshot } from './sync-progress';
 
 export interface SyncPluginController {
   app: App;
@@ -18,6 +19,7 @@ export interface SyncPluginController {
   testConnection(): Promise<string>;
   syncNow(): Promise<void>;
   diagnostics(): string;
+  progressSnapshot(): SyncProgressSnapshot | null;
 }
 
 type EditableKey = 'serverUrl' | 'deviceName' | 'paused' | 'fallbackPollSeconds' | 'modifyDebounceMs' | 'mobileLargeFileMiB' | 'excludeGlobs';
@@ -45,6 +47,7 @@ export class CentralSyncSettingTab extends PluginSettingTab {
 
   getSettingDefinitions(): SettingDefinitionItem[] {
     const state = this.controller.store.state;
+    const progress = this.controller.progressSnapshot();
     return [
       {
         type: 'group', items: [
@@ -86,6 +89,13 @@ export class CentralSyncSettingTab extends PluginSettingTab {
         type: 'group', heading: 'Status and diagnostics', items: [
           { name: 'Server-enforced exclusions', desc: `${this.app.vault.configDir}/**, .git/**, .trash/**, temporary/OS files, and internal sync metadata never synchronize.` },
           {
+            name: 'Progress', desc: progress
+              ? `${progress.active ? 'Live' : 'Last'} aggregate progress: ${formatProgress(progress)}; `
+                + `${progress.operationRequests} operation request(s), ${progress.blobRequests} blob request(s), `
+                + `${(progress.elapsedMs / 1_000).toFixed(1)}s elapsed, resumed=${String(progress.resumed)}.`
+              : 'No reconciliation progress has been recorded in this session.',
+          },
+          {
             name: 'Operations', desc: `${state.operations.length} durable operation(s), ${state.pendingPaths.length} path marker(s), ${state.applyIntents.length} apply intent(s).`,
             render: (setting) => {
               setting.addButton((button) => button.setCta().setButtonText('Sync now').setDisabled(!state.deviceId || state.paused).onClick(async () => {
@@ -103,6 +113,8 @@ export class CentralSyncSettingTab extends PluginSettingTab {
       },
     ];
   }
+
+  refreshProgress(): void { this.refresh(); }
 
   /** Obsidian 1.11–1.12 compatibility renderer; 1.13+ uses the searchable definitions above. */
   display(): void {

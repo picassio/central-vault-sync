@@ -3,9 +3,10 @@ import { OrderedSyncClient, type OperationResult, type SyncConnectionStatus } fr
 import { LocalMutationQueue } from './local-queue';
 import { ObsidianSyncAdapter } from './obsidian-adapter';
 import { PluginStore } from './plugin-store';
-import { ProtocolClient, validateServerUrl } from './protocol-client';
+import { ProtocolClient, ProtocolError, validateServerUrl, type ProtocolTelemetry } from './protocol-client';
 import { CentralSyncSettingTab } from './settings';
 import { ConflictModal } from './conflict-modal';
+import { formatProgress, SyncProgressModel, type SyncProgressSnapshot } from './sync-progress';
 
 export default class CentralVaultSyncPlugin extends Plugin {
   store!: PluginStore;
@@ -13,13 +14,19 @@ export default class CentralVaultSyncPlugin extends Plugin {
   private adapter: ObsidianSyncAdapter | null = null;
   private engine: OrderedSyncClient | null = null;
   private localQueue: LocalMutationQueue | null = null;
-  private statusEl!: HTMLElement;
+  private statusEl: HTMLElement | null = null;
+  private settingTab: CentralSyncSettingTab | null = null;
+  private progressRender: number | null = null;
   private status: SyncConnectionStatus = 'disabled';
+  private readonly progress = new SyncProgressModel((immediate) => this.scheduleProgressRender(immediate));
+  private engineStarted = false;
+  private initialScanComplete = false;
   private lag = 0;
   private conflicts = 0;
   private pendingRetry: number | null = null;
   private active = false;
   private starting: Promise<void> | null = null;
+  private syncing: Promise<void> | null = null;
 
   async onload(): Promise<void> {
     this.active = true;
@@ -32,7 +39,8 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.registerDomEvent(this.statusEl, 'keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') void this.syncNow().catch((error) => new Notice(message(error)));
     });
-    this.addSettingTab(new CentralSyncSettingTab(this.app, this));
+    this.settingTab = new CentralSyncSettingTab(this.app, this);
+    this.addSettingTab(this.settingTab);
     this.registerCommands();
     this.registerVaultEvents();
     this.registerForegroundEvents();
@@ -48,7 +56,8 @@ export default class CentralVaultSyncPlugin extends Plugin {
   onunload(): void {
     this.active = false;
     if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
-    this.pendingRetry = null;
+    if (this.progressRender !== null) window.clearTimeout(this.progressRender);
+    this.pendingRetry = null; this.progressRender = null;
     void this.localQueue?.flushAll().catch(() => {});
     this.localQueue?.dispose();
     this.engine?.stop();
@@ -72,7 +81,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
     this.pendingRetry = null;
     this.engine?.stop(); this.localQueue?.dispose(); this.store.clearToken();
-    this.engine = null; this.client = null; this.adapter = null; this.localQueue = null;
+    this.engine = null; this.client = null; this.adapter = null; this.localQueue = null; this.engineStarted = false;
     await this.store.update((state) => {
       state.deviceId = null; state.vaultId = null; state.cursor = 0; state.nextClientSequence = 1;
       state.operations = []; state.applyIntents = []; state.entries = []; state.pendingPaths = [];
@@ -89,23 +98,40 @@ export default class CentralVaultSyncPlugin extends Plugin {
     return `Connected to vault ${handshake.vaultId}; server sequence ${handshake.latestSequence}.`;
   }
 
-  async syncNow(): Promise<void> {
+  syncNow(): Promise<void> {
+    if (this.syncing) return this.syncing;
+    const sync = this.syncNowOnce().finally(() => { if (this.syncing === sync) this.syncing = null; });
+    this.syncing = sync;
+    return sync;
+  }
+
+  private async syncNowOnce(): Promise<void> {
     if (this.store.state.paused) throw new Error('Sync is paused');
     if (!this.engine || !this.localQueue) throw new Error('Device is not paired');
     this.setStatus('syncing', this.lag);
     try {
-      await this.localQueue.flushAll();
-      await this.engine.start();
-      await this.engine.flush();
-      await this.engine.catchUp();
+      if (!this.engineStarted) {
+        await this.engine.start();
+        this.engineStarted = true;
+      } else {
+        await this.localQueue.flushAll();
+        const queued = this.store.state.operations.length;
+        this.progress.begin('publishing', queued);
+        await this.engine.flush();
+        this.progress.begin('applying');
+        await this.engine.catchUp();
+      }
+      this.progress.begin('finalizing', 1);
       await this.refreshConflictCount();
+      this.progress.update(1, 1);
+      this.progress.finish();
       if (this.store.state.lastError !== null) await this.store.update((state) => { state.lastError = null; });
       if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
       this.pendingRetry = null;
     } catch (error) {
       this.setStatus('offline', this.lag);
       await this.recordError(error);
-      if (this.store.state.pendingPaths.length > 0 || this.store.state.operations.length > 0) this.schedulePendingRetry();
+      this.schedulePendingRetry(error);
       throw error;
     }
   }
@@ -119,7 +145,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
       status: this.status, lag: this.lag, conflicts: this.conflicts, paused: state.paused,
       queuedOperations: state.operations.length, pendingPaths: state.pendingPaths.length,
       applyIntents: state.applyIntents.length, projectedEntries: state.entries.length,
-      excludes: state.excludeGlobs, lastError: state.lastError,
+      progress: this.progress.snapshot(), excludeGlobs: state.excludeGlobs.length, hasLastError: state.lastError !== null,
       platform: { mobile: Platform.isMobile, ios: Platform.isIosApp, android: Platform.isAndroidApp },
     }, null, 2);
   }
@@ -131,38 +157,80 @@ export default class CentralVaultSyncPlugin extends Plugin {
     return start;
   }
 
+  progressSnapshot(): SyncProgressSnapshot | null { return this.progress.snapshot(); }
+
   private async startClientOnce(): Promise<void> {
     if (this.pendingRetry !== null) window.clearTimeout(this.pendingRetry);
     this.pendingRetry = null;
-    this.engine?.stop(); this.localQueue?.dispose();
+    this.engine?.stop(); this.localQueue?.dispose(); this.engineStarted = false; this.initialScanComplete = false;
     const device = await this.store.getDevice();
     if (!device) return;
-    this.client = new ProtocolClient(this.store.state.serverUrl, device.token);
+    this.client = new ProtocolClient(this.store.state.serverUrl, device.token, (event) => this.recordTelemetry(event));
     this.adapter = new ObsidianSyncAdapter(
       this.app.vault, this.app.fileManager, this.app.workspace, this.store, this.client,
       (path, size) => this.approveLargeDownload(path, size),
       (result) => this.handleConflict(result),
     );
+    const recoveryIntents = await this.store.applyIntents();
+    if (this.progress.snapshot()?.active) this.progress.restart('recovering', recoveryIntents.length);
+    else this.progress.begin('recovering', recoveryIntents.length);
     this.engine = new OrderedSyncClient(
       this.store, this.client, this.adapter,
       (status, lag) => this.setStatus(status, lag),
       undefined, this.store.state.fallbackPollSeconds * 1_000,
+      {
+        onRecoveryComplete: () => {
+          if (this.progress.snapshot()?.phase === 'recovering') this.progress.increment();
+        },
+        onEventDurable: () => {
+          if (this.progress.snapshot()?.phase === 'applying') this.progress.increment();
+        },
+        afterRecovery: async () => {
+          if (this.progress.snapshot()?.phase === 'recovering') this.progress.begin('manifest');
+        },
+        beforeBootstrap: async (snapshot) => {
+          if (this.progress.snapshot()?.phase === 'manifest') {
+            this.progress.update(snapshot.entries.length, snapshot.entries.length);
+          }
+          await this.scanLocalChanges();
+          this.initialScanComplete = true;
+        },
+        beforeInitialFlush: async () => {
+          if (!this.initialScanComplete) await this.scanLocalChanges();
+          this.initialScanComplete = true;
+          if (this.progress.snapshot()?.phase !== 'publishing') await this.localQueue?.flushAll();
+          this.progress.begin('publishing', this.store.state.operations.length);
+        },
+        onOperationDurable: (operation) => {
+          const bytes = 'content' in operation ? operation.content.size : 0;
+          if (this.progress.snapshot()?.phase === 'publishing') this.progress.increment(1, bytes);
+        },
+        beforeInitialCatchUp: async () => { this.progress.begin('applying'); },
+      },
     );
     this.localQueue = new LocalMutationQueue(
       this.app.vault, this.app.vault.configDir, this.store, this.client, this.engine, this.adapter,
       (error) => { void this.handleLocalQueueError(error); },
+      (progress) => {
+        const current = this.progress.snapshot();
+        if (current?.phase !== progress.phase) this.progress.begin(progress.phase, progress.totalItems, progress.totalBytes);
+        this.progress.update(progress.completedItems, progress.totalItems, progress.completedBytes, progress.totalBytes);
+      },
     );
-    await this.scanLocalChanges();
     if (!this.active) { this.localQueue.dispose(); this.engine.stop(); return; }
     await this.syncNow().catch(() => {});
   }
 
-  private schedulePendingRetry(): void {
+  private schedulePendingRetry(error?: unknown): void {
     if (this.pendingRetry !== null || this.store.state.paused || !this.engine || !this.localQueue) return;
-    const delay = Math.max(1_000, this.store.state.fallbackPollSeconds * 1_000);
+    const retryAfterMs = error instanceof ProtocolError && error.retryAfterSeconds
+      ? error.retryAfterSeconds * 1_000
+      : 0;
+    const delay = Math.max(1_000, this.store.state.fallbackPollSeconds * 1_000, retryAfterMs);
     this.pendingRetry = window.setTimeout(() => {
       this.pendingRetry = null;
-      void this.syncNow().catch(() => {});
+      const retry = this.engineStarted ? this.syncNow() : this.startClient();
+      void retry.catch(() => {});
     }, delay);
   }
 
@@ -206,21 +274,49 @@ export default class CentralVaultSyncPlugin extends Plugin {
 
   private async scanLocalChanges(): Promise<void> {
     if (!this.localQueue) return;
-    const folders = this.app.vault.getAllFolders(false).sort((a, b) => a.path.split('/').length - b.path.split('/').length);
-    const paths = [...folders, ...this.app.vault.getFiles()];
-    for (let index = 0; index < paths.length; index += 1) {
-      if (!this.active) return;
-      await this.localQueue.reconcile(paths[index]!);
-      if ((index + 1) % 100 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-    }
+    const folders = this.app.vault.getAllFolders(false).sort((a, b) => {
+      const depth = a.path.split('/').length - b.path.split('/').length;
+      return depth || a.path.localeCompare(b.path);
+    });
+    const paths = [...folders, ...this.app.vault.getFiles().sort((a, b) => a.path.localeCompare(b.path))];
+    if (!this.active) return;
+    await this.localQueue.reconcileAll(paths);
   }
   private setStatus(status: SyncConnectionStatus, lag: number): void {
     this.status = status; this.lag = lag; this.renderStatus();
   }
+  private recordTelemetry(event: ProtocolTelemetry): void {
+    const current = this.progress.snapshot();
+    if (!current?.active) return;
+    if (event.kind === 'manifest') {
+      if (current.phase === 'manifest') this.progress.increment(event.entries);
+    } else {
+      this.progress.incrementRequests(event.request);
+    }
+  }
+  private scheduleProgressRender(immediate = false): void {
+    if (!this.statusEl) return;
+    if (immediate) {
+      if (this.progressRender !== null) window.clearTimeout(this.progressRender);
+      this.progressRender = null;
+      this.renderStatus();
+      this.settingTab?.refreshProgress();
+      return;
+    }
+    if (this.progressRender !== null) return;
+    this.progressRender = window.setTimeout(() => {
+      this.progressRender = null;
+      this.renderStatus();
+      this.settingTab?.refreshProgress();
+    }, 250);
+  }
   private renderStatus(): void {
+    if (!this.statusEl) return;
     const conflict = this.conflicts > 0 ? ` · ${this.conflicts} conflict${this.conflicts === 1 ? '' : 's'}` : '';
-    this.statusEl.setText(`Central Sync: ${this.status}${this.lag ? ` · ${this.lag} pending` : ''}${conflict}`);
-    this.statusEl.setAttr('aria-label', 'Central Sync status; click to sync now');
+    const progress = this.progress.snapshot();
+    const progressText = progress?.active ? ` · ${formatProgress(progress)}` : '';
+    this.statusEl.setText(`Central Sync: ${this.status}${progressText}${this.lag ? ` · ${this.lag} pending` : ''}${conflict}`);
+    this.statusEl.setAttr('aria-label', 'Central Sync status and aggregate progress; click to sync now');
   }
   private async refreshConflictCount(): Promise<void> {
     if (!this.client) { this.conflicts = 0; this.renderStatus(); return; }
@@ -240,7 +336,7 @@ export default class CentralVaultSyncPlugin extends Plugin {
     this.setStatus('offline', this.lag);
     await this.recordError(error);
     new Notice(`Central Sync: ${safeMessage(error)}`);
-    this.schedulePendingRetry();
+    this.schedulePendingRetry(error);
   }
   private async recordError(error: unknown): Promise<void> {
     await this.store.update((state) => { state.lastError = safeMessage(error); });

@@ -10,6 +10,11 @@ test('settings expose one searchable definition source and normalize persisted c
     app: { vault: { configDir: 'custom-config' } } as unknown as App,
     store: { state: structuredClone(DEFAULT_STATE), save: async () => { saves += 1; } },
     pair: async () => {}, unpair: async () => {}, testConnection: async () => 'ok', syncNow: async () => {}, diagnostics: () => '{}',
+    progressSnapshot: () => ({
+      phase: 'uploading', completedItems: 4, totalItems: 10, completedBytes: 1024, totalBytes: 2048,
+      operationRequests: 1, blobRequests: 4, elapsedMs: 1_000, resumed: false,
+      active: true, startedAt: '2026-07-16T00:00:00.000Z', updatedAt: '2026-07-16T00:00:01.000Z',
+    }),
   };
   const tab = new CentralSyncSettingTab(controller.app, controller);
   (tab as unknown as { app: App }).app = controller.app;
@@ -18,6 +23,7 @@ test('settings expose one searchable definition source and normalize persisted c
   const names = groups.flatMap((group) => group.items ?? []).filter((item) => 'name' in item).map((item) => item.name);
   assert.ok(names.includes('Server URL'));
   assert.ok(names.includes('One-time pairing code'));
+  assert.ok(names.includes('Progress'));
   assert.ok(names.includes('Copy redacted diagnostics') === false);
   const unpairedConnection = groups.flatMap((group) => group.items ?? []).find((item) => 'name' in item && item.name === 'Connection');
   const unpairedDescription = unpairedConnection && 'desc' in unpairedConnection ? unpairedConnection.desc : undefined;

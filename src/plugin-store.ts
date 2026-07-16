@@ -101,8 +101,11 @@ export class PluginStore implements SyncClientPersistence {
       else if (JSON.stringify(existing) !== JSON.stringify(operation)) throw new Error('idempotency key payload changed');
     });
   }
-  async removeOperation(idempotencyKey: string) {
-    await this.update((state) => { state.operations = state.operations.filter((item) => item.idempotencyKey !== idempotencyKey); });
+  async removeOperation(idempotencyKey: string) { await this.removeOperations([idempotencyKey]); }
+  async removeOperations(idempotencyKeys: string[]) {
+    if (idempotencyKeys.length === 0) return;
+    const keys = new Set(idempotencyKeys);
+    await this.update((state) => { state.operations = state.operations.filter((item) => !keys.has(item.idempotencyKey)); });
   }
   async putApplyIntent(intent: ClientApplyIntent) {
     await this.update((state) => {
@@ -129,21 +132,56 @@ export class PluginStore implements SyncClientPersistence {
     if (!entry.deleted) this.entriesByPath.set(entry.path, entry);
     await this.save();
   }
-  async queuePath(pending: PendingPath) {
+  async queuePath(pending: PendingPath) { await this.queuePaths([pending]); }
+  async queuePaths(pendingPaths: PendingPath[], preserveExisting = false) {
+    if (pendingPaths.length === 0) return;
     await this.update((state) => {
-      const existing = state.pendingPaths.find((item) => item.path === pending.path);
-      const merged = existing?.action === 'rename' && pending.action !== 'rename'
-        ? {
-            ...existing,
-            observedAt: pending.observedAt,
-            ...(pending.action === 'delete' ? { followUpAction: 'delete' as const } : {}),
-          }
-        : pending;
-      state.pendingPaths = [...state.pendingPaths.filter((item) => item.path !== pending.path), merged];
+      const byPath = new Map(state.pendingPaths.map((item) => [item.path, item]));
+      for (const pending of pendingPaths) {
+        const existing = byPath.get(pending.path);
+        if (existing && preserveExisting) continue;
+        const merged = existing?.action === 'rename' && pending.action !== 'rename'
+          ? {
+              ...existing,
+              observedAt: pending.observedAt,
+              ...(pending.action === 'delete' ? { followUpAction: 'delete' as const } : {}),
+            }
+          : pending;
+        byPath.delete(pending.path);
+        byPath.set(pending.path, merged);
+      }
+      state.pendingPaths = [...byPath.values()];
     });
   }
-  async removePendingPath(path: string) {
-    await this.update((state) => { state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path); });
+  async removePendingPath(path: string, expected?: PendingPath) {
+    await this.update((state) => {
+      state.pendingPaths = state.pendingPaths.filter((item) => item.path !== path || Boolean(expected && !samePendingPath(item, expected)));
+    });
+  }
+
+  async commitPreparedPaths(prepared: Array<{
+    pending: PendingPath;
+    operation: (clientSequence: number, idempotencyKey: string) => SyncOperation | null;
+  }>): Promise<PendingPath[]> {
+    const committed: PendingPath[] = [];
+    await this.update((state) => {
+      const currentByPath = new Map(state.pendingPaths.map((pending) => [pending.path, pending]));
+      const removedPaths = new Set<string>();
+      for (const item of prepared) {
+        const current = currentByPath.get(item.pending.path);
+        if (removedPaths.has(item.pending.path) || !current || !samePendingPath(current, item.pending)) continue;
+        const clientSequence = state.nextClientSequence;
+        const operation = item.operation(clientSequence, `plugin-${clientSequence}-${randomId()}`);
+        if (operation) {
+          state.nextClientSequence = clientSequence + 1;
+          state.operations.push(operation);
+        }
+        removedPaths.add(item.pending.path);
+        committed.push(item.pending);
+      }
+      if (removedPaths.size > 0) state.pendingPaths = state.pendingPaths.filter((pending) => !removedPaths.has(pending.path));
+    });
+    return committed;
   }
 
   private rebuildEntryIndexes(): void {
@@ -155,4 +193,14 @@ export class PluginStore implements SyncClientPersistence {
       if (!entry.deleted) this.entriesByPath.set(entry.path, entry);
     }
   }
+}
+
+export function samePendingPath(left: PendingPath, right: PendingPath): boolean {
+  return left.path === right.path && left.action === right.action && left.oldPath === right.oldPath
+    && left.followUpAction === right.followUpAction && left.observedAt === right.observedAt;
+}
+
+function randomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
 }

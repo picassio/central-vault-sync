@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Community review release:** `0.1.15` is published as a normal GitHub release for directory scanning and
+> **Community review release:** `0.1.16` is the current normal GitHub review release for directory scanning and
 > backed-up testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
@@ -17,6 +17,8 @@ Revision-safe two-way synchronization between an Obsidian vault and a self-hoste
 - Suppresses remote-apply echoes by expected path and hash, not a timer-only flag.
 - Defers remote replacement, rename, or deletion while the affected path has durable local work or an unsaved open editor; overlapping edits become server conflict copies rather than disappearing.
 - Keeps credentials out of the vault and plugin `data.json` through Obsidian SecretStorage.
+- Shows live aggregate recovery, manifest, scan, upload, publication, apply, and finalization progress without exposing paths or note content.
+- Uses at most four concurrent uploads and capability-gated ordered operation batches; older servers safely fall back to one operation per request.
 
 ## Requirements
 

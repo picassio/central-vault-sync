@@ -7,6 +7,7 @@ export default defineConfig(
 		'node_modules',
 		'dist',
 		'esbuild.config.mjs',
+		'scripts/bootstrap-benchmark.ts',
 		'version-bump.mjs',
 		'versions.json',
 		'main.js',

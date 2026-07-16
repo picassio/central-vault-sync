@@ -97,6 +97,53 @@ test('large projections use indexed path/id lookup and update rename/tombstone m
   assert.equal(store.state.entries.length, 10_000);
 });
 
+test('batch path checkpoint and prepared-operation commit are atomic and ignore stale markers', async () => {
+  const fake = fakePlugin();
+  const store = new PluginStore(fake.plugin);
+  await store.load();
+  const first = { path: 'A.md', action: 'upsert' as const, observedAt: '2026-07-16T00:00:00.000Z' };
+  const second = { path: 'B.md', action: 'upsert' as const, observedAt: '2026-07-16T00:00:00.000Z' };
+  await store.queuePaths([first, second], true);
+  assert.equal(fake.writes.length, 1);
+
+  const newer = { ...second, observedAt: '2026-07-16T00:00:01.000Z' };
+  await store.queuePath(newer);
+  const committed = await store.commitPreparedPaths([first, second].map((pending) => ({
+    pending,
+    operation: (clientSequence: number, idempotencyKey: string): SyncOperation => ({
+      operation: 'create', path: pending.path, kind: 'file', clientSequence, idempotencyKey,
+      content: { hash: sha256Text(pending.path), size: pending.path.length, blobHash: sha256Text(pending.path) },
+    }),
+  })));
+
+  assert.deepEqual(committed, [first]);
+  assert.deepEqual(store.state.pendingPaths, [newer]);
+  assert.equal(store.state.operations.length, 1);
+  assert.equal(store.state.operations[0]?.clientSequence, 1);
+  const durable = fake.writes.at(-1) as { pendingPaths: unknown[]; operations: unknown[]; nextClientSequence: number };
+  assert.equal(durable.pendingPaths.length, 1);
+  assert.equal(durable.operations.length, 1);
+  assert.equal(durable.nextClientSequence, 2);
+});
+
+test('terminal operation batches are removed in one durable state write', async () => {
+  const fake = fakePlugin();
+  const store = new PluginStore(fake.plugin);
+  await store.load();
+  const { writes } = fake;
+  const operations = [1, 2, 3].map((clientSequence) => ({
+    operation: 'delete' as const, entryId: `entry_remove_${clientSequence}`, baseRevision: 1,
+    clientSequence, idempotencyKey: `plugin-remove-operation-${clientSequence}`,
+  }));
+  store.state.operations = operations;
+  writes.length = 0;
+
+  await store.removeOperations(operations.slice(0, 2).map((operation) => operation.idempotencyKey));
+
+  assert.deepEqual(store.state.operations.map((operation) => operation.clientSequence), [3]);
+  assert.equal(writes.length, 1);
+});
+
 test('exact duplicate operation converges but changed idempotency payload is rejected', async () => {
   const store = new PluginStore(fakePlugin().plugin);
   await store.load();

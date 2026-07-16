@@ -1,6 +1,6 @@
 {
   "name": "central-vault-sync",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "description": "Revision-safe synchronization with a self-hosted authoritative vault server.",
   "main": "main.js",
   "type": "module",
@@ -11,6 +11,7 @@
     "test": "node --import tsx --import ./test/register-obsidian.mjs --test test/*.test.ts",
     "lint": "eslint .",
     "policy": "node scripts/policy-check.mjs",
+    "benchmark:bootstrap": "node --import tsx --import ./test/register-obsidian.mjs scripts/bootstrap-benchmark.ts",
     "check": "npm run lint && npm run typecheck && npm test && npm run build && npm run policy"
   },
   "keywords": [
@@ -21,7 +22,7 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@picassio/sync-core": "0.1.3"
+    "@picassio/sync-core": "0.1.4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

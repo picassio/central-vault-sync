@@ -30,9 +30,18 @@ export class ProtocolError extends Error {
   }
 }
 
+export type ProtocolTelemetry =
+  | { kind: 'request'; request: 'operation' | 'blob' }
+  | { kind: 'manifest'; entries: number };
+
 export class ProtocolClient implements SyncClientTransport {
   readonly baseUrl: string;
-  constructor(serverUrl: string, private token: string) {
+  private retryNotBefore = 0;
+  constructor(
+    serverUrl: string,
+    private token: string,
+    private readonly telemetry: (event: ProtocolTelemetry) => void = () => {},
+  ) {
     this.baseUrl = validateServerUrl(serverUrl);
   }
   setToken(token: string): void { this.token = token; }
@@ -63,6 +72,7 @@ export class ProtocolClient implements SyncClientTransport {
       const response = await this.request(`/manifest${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
       const page = ManifestPageSchema.parse(response.json);
       entries.push(...page.entries);
+      this.telemetry({ kind: 'manifest', entries: page.entries.length });
       snapshotSequence = page.snapshotSequence;
       cursor = page.nextCursor;
     } while (cursor);
@@ -152,6 +162,10 @@ export class ProtocolClient implements SyncClientTransport {
     authenticated = true,
     expectJson = true,
   ): Promise<RequestUrlResponse> {
+    const retryDelay = this.retryNotBefore - Date.now();
+    if (retryDelay > 0) await new Promise<void>((resolve) => window.setTimeout(resolve, retryDelay));
+    if (path === '/operations') this.telemetry({ kind: 'request', request: 'operation' });
+    else if (path.startsWith('/blob-uploads') || path.startsWith('/blobs/')) this.telemetry({ kind: 'request', request: 'blob' });
     const response = await requestUrl({
       url: `${this.baseUrl}/api/sync/v1${path}`,
       method: options.method ?? 'GET',
@@ -163,8 +177,10 @@ export class ProtocolClient implements SyncClientTransport {
     if (response.status < 200 || response.status >= 300) {
       const payload = response.json as { error?: { code?: string; message?: string; retryable?: boolean; details?: { retryAfter?: number } } } | undefined;
       const error = payload?.error;
-      const retryAfter = Number(error?.details?.retryAfter ?? response.headers['retry-after'] ?? response.headers['Retry-After']);
-      const retryAfterSeconds = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.ceil(retryAfter) : undefined;
+      const retryAfterSeconds = parseRetryAfter(
+        error?.details?.retryAfter ?? response.headers['retry-after'] ?? response.headers['Retry-After'],
+      );
+      if (retryAfterSeconds) this.retryNotBefore = Math.max(this.retryNotBefore, Date.now() + retryAfterSeconds * 1_000);
       const baseMessage = error?.message ?? `HTTP ${response.status}`;
       const displayMessage = error?.code === 'rate_limited' && retryAfterSeconds
         ? `${baseMessage}; retry in ${retryAfterSeconds} seconds`
@@ -183,6 +199,17 @@ export function validateServerUrl(value: string): string {
   }
   url.hash = ''; url.search = '';
   return url.toString().replace(/\/$/, '');
+}
+
+export function parseRetryAfter(value: unknown, now = Date.now()): number | undefined {
+  if (typeof value === 'number' || (typeof value === 'string' && /^\s*\d+(?:\.\d+)?\s*$/u.test(value))) {
+    const seconds = Number(value);
+    return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : undefined;
+  }
+  if (typeof value !== 'string') return undefined;
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt) || retryAt <= now) return undefined;
+  return Math.ceil((retryAt - now) / 1_000);
 }
 
 function stripEtag(value: string): string { return value.replace(/^W\//, '').replaceAll('"', ''); }
