@@ -37,23 +37,15 @@ jobs:
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            # Keep one subject per statement. Obsidian's Community scanner verifies
-            # each release asset against a single-subject provenance bundle.
-            - name: Attest main.js build provenance
-              uses: actions/attest-build-provenance@v4
+            # Obsidian Community currently verifies v3 provenance but rejects
+            # otherwise-valid v4 statements. Pin the exact accepted v3 commit.
+            - name: Attest release build provenance
+              uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
               with:
-                  subject-path: main.js
-
-            - name: Attest manifest.json build provenance
-              uses: actions/attest-build-provenance@v4
-              with:
-                  subject-path: manifest.json
-
-            - name: Attest styles.css build provenance
-              if: steps.styles.outputs.exists == 'true'
-              uses: actions/attest-build-provenance@v4
-              with:
-                  subject-path: styles.css
+                  subject-path: |
+                      main.js
+                      manifest.json
+                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
             - name: Create release
               env:
