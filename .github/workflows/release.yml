@@ -33,10 +33,11 @@ jobs:
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
             - name: Attest build provenance
-              uses: actions/attest@v4
+              uses: actions/attest-build-provenance@v4
               with:
                   subject-path: |
                       main.js
+                      manifest.json
                       ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
 
             - name: Create release
