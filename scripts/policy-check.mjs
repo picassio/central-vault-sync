@@ -33,6 +33,9 @@ for (const file of sourceFiles) {
   }
 }
 const bundle = await readFile(path.join(root, 'main.js'), 'utf8').catch(() => '');
+const styles = await readFile(path.join(root, 'styles.css'), 'utf8').catch(() => '');
+requireTrue(bundle.includes(`central-vault-sync release: ${manifest.version}`), 'bundle release marker does not match manifest');
+requireTrue(styles.startsWith(`/* central-vault-sync release: ${manifest.version} */\n`), 'stylesheet release marker does not match manifest');
 requireTrue(!/(?:node:|child_process|electron|require\(["'](?:fs|path|os))/.test(bundle), 'bundle contains a desktop/Node-only API');
 requireTrue(!/\beval\s*\(/.test(bundle), 'bundle contains eval');
 requireTrue(Buffer.byteLength(bundle) < 2 * 1024 * 1024, 'bundle exceeds 2 MiB');

@@ -15,3 +15,13 @@ if (!(targetVersion in versions)) {
 	versions[targetVersion] = minAppVersion;
 	writeFileSync('versions.json', JSON.stringify(versions, null, '\t'));
 }
+
+// Keep the distributed stylesheet digest release-specific so provenance lookup
+// cannot be confused with attestations issued for an older tag's identical CSS.
+const stylesPath = 'styles.css';
+const styles = readFileSync(stylesPath, 'utf8');
+const releaseMarker = `/* central-vault-sync release: ${targetVersion} */\n`;
+const updatedStyles = /^\/\* central-vault-sync release: [^\n]+ \*\/\n/.test(styles)
+	? styles.replace(/^\/\* central-vault-sync release: [^\n]+ \*\/\n/, releaseMarker)
+	: `${releaseMarker}${styles}`;
+writeFileSync(stylesPath, updatedStyles);
