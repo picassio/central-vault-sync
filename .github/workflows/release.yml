@@ -10,8 +10,6 @@ jobs:
         runs-on: ubuntu-latest
         permissions:
             contents: write
-            id-token: write
-            attestations: write
         steps:
             - uses: actions/checkout@v6
 
@@ -37,15 +35,9 @@ jobs:
               run: |
                   [ -f styles.css ] && echo "exists=true" >> "$GITHUB_OUTPUT" || echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            # Obsidian Community currently verifies v3 provenance but rejects
-            # otherwise-valid v4 statements. Pin the exact accepted v3 commit.
-            - name: Attest release build provenance
-              uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
-              with:
-                  subject-path: |
-                      main.js
-                      manifest.json
-                      ${{ steps.styles.outputs.exists == 'true' && 'styles.css' || '' }}
+            # Artifact attestations are intentionally omitted from Community-review
+            # releases while Obsidian's scorecard rejects newly issued valid bundles.
+            # Exact hashes, reproducible builds, and CI remain mandatory.
 
             - name: Create release
               env:

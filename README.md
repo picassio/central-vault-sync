@@ -2,7 +2,7 @@
 
 Revision-safe two-way synchronization between an Obsidian vault and a self-hosted WebObsidian server. The server is authoritative: every accepted mutation receives a stable entry identity, revision, content hash, and ordered journal sequence.
 
-> **Community review release:** `0.1.21` is the current normal GitHub review release for directory scanning and
+> **Community review release:** `0.1.22` is the current normal GitHub review release for directory scanning and
 > backed-up testing. It is not yet listed in Community Plugins. Use the
 > [validation checklist](https://github.com/picassio/central-vault-sync/issues/1) for feedback; never post
 > credentials, private vault content, or unredacted diagnostics.
