@@ -24,7 +24,12 @@ jobs:
             - name: Verify tag and build plugin
               run: |
                   npm ci
-                  test "${GITHUB_REF#refs/tags/}" = "$(node -p "require('./manifest.json').version")"
+                  tag="${GITHUB_REF#refs/tags/}"
+                  test "$tag" = "$(node -p "require('./manifest.json').version")"
+                  test "$(git cat-file -t "refs/tags/$tag")" = commit || {
+                    echo "Release tags must be lightweight so provenance source digests match the tag ref." >&2
+                    exit 1
+                  }
                   npm run check
 
             - name: Check for optional styles
